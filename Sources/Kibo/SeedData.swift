@@ -2,9 +2,7 @@ import Foundation
 import SwiftData
 
 /// Sample data for snapshots: APP_SEED=1 with APP_STORE in /tmp fills an empty
-/// store with realistic items (short and long titles, starred and not).
-/// Replace these with your app's own types. Seed only what a person can
-/// create in the app, or the snapshots show features no one can use.
+/// store with realistic snippets.
 @MainActor
 enum SeedData {
     static func insertIfRequested(into model: AppModel) {
@@ -14,22 +12,21 @@ enum SeedData {
             return
         }
         let context = model.container.mainContext
-        guard ((try? context.fetchCount(FetchDescriptor<Item>())) ?? 0) == 0 else { return }
-        let samples: [(String, Bool)] = [
-            ("Book the dentist", false),
-            ("Read the article about local-first software and write down three ideas worth trying", true),
-            ("Renew passport", false),
-            ("Plan the weekend trip", true),
-            ("Call Anna", false),
-            ("Back up the photo library to the external drive before the trip", false),
-            ("Groceries", false),
-            ("Draft the quarterly review", true),
+        guard ((try? context.fetchCount(FetchDescriptor<Snippet>())) ?? 0) == 0 else { return }
+        let samples: [(String, String, String, Bool)] = [
+            ("Debate Preparation", ":debate:", "You are a debate coach. Help me prepare arguments for and against the following topic. Provide strong points for both sides, anticipate counterarguments, and suggest rhetorical strategies.", true),
+            ("Research Assistant", ":research:", "You are a research assistant. Summarise the key findings, methodology, and conclusions from the following text. Highlight any limitations or biases.", false),
+            ("Email Writer", ":email:", "Write a professional email with the following details. Keep the tone polite and concise. Include a clear subject line suggestion.", true),
+            ("Coding Assistant", ":code:", "You are an expert programmer. Help me write clean, well-documented code for the following task. Explain your approach and any trade-offs.", false),
+            ("Essay Improver", ":essay:", "Review and improve the following essay. Fix grammar, improve clarity, strengthen arguments, and suggest better transitions between paragraphs.", false),
+            ("Quick Reply", ":reply:", "Write a brief, friendly reply to the following message.", true),
         ]
         for (index, sample) in samples.enumerated() {
-            let item = Item(title: sample.0)
-            item.isStarred = sample.1
-            item.createdAt = Date.now.addingTimeInterval(Double(-index) * 3_600)
-            context.insert(item)
+            let snippet = Snippet(name: sample.0, alias: sample.1, content: sample.2)
+            snippet.isFavourite = sample.3
+            snippet.createdAt = Date.now.addingTimeInterval(Double(-index) * 3_600)
+            snippet.modifiedAt = snippet.createdAt
+            context.insert(snippet)
         }
         try? context.save()
     }

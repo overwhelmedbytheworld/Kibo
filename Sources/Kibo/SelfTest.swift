@@ -26,21 +26,28 @@ enum SelfTest {
         Task {
             try? await Task.sleep(for: .seconds(0.5))
             let context = model.container.mainContext
-            func items() -> [Item] { (try? context.fetch(FetchDescriptor<Item>())) ?? [] }
+            func snippets() -> [Snippet] { (try? context.fetch(FetchDescriptor<Snippet>())) ?? [] }
 
-            let before = items().count
-            model.addItem()
-            check("New Item adds one item", items().count == before + 1)
-            check("the new item is selected", model.selection != nil)
+            let before = snippets().count
+            model.addSnippet()
+            let afterAdd = snippets()
+            check("New Snippet adds one snippet", afterAdd.count == before + 1)
+            check("the new snippet is selected", model.selection != nil)
 
-            if let item = items().first(where: { $0.id == model.selection }) {
-                item.isStarred.toggle()
-                check("starring an item marks it starred", item.isStarred)
-                context.delete(item)
+            if let snippet = afterAdd.first(where: { $0.id == model.selection }) {
+                snippet.isFavourite.toggle()
+                check("favouriting a snippet marks it", snippet.isFavourite)
+                context.delete(snippet)
                 try? context.save()
-                check("deleting the item removes it", items().count == before)
+                check("deleting the snippet removes it", snippets().count == before)
             }
-            check("titles are cleaned", ItemTitle.clean("  Buy   milk ") == "Buy milk")
+
+            // Alias validation
+            check("valid alias :email:", SnippetAlias.isValid(":email:"))
+            check("valid alias :my-prompt:", SnippetAlias.isValid(":my-prompt:"))
+            check("invalid alias without colons", !SnippetAlias.isValid("email"))
+            check("invalid alias too short", !SnippetAlias.isValid(":ab:"))
+            check("alias clean normalises", SnippetAlias.clean("Email") == ":email:")
 
             print(failures == 0 ? "SELFTEST PASS \(count) checks" : "SELFTEST FAIL \(failures) of \(count) checks")
             finish(code: failures == 0 ? 0 : 1)
@@ -53,8 +60,7 @@ enum SelfTest {
         print(ok ? "PASS \(name)" : "FAIL \(name)\(detail.isEmpty ? "" : ": \(detail)")")
     }
 
-    /// Quits through NSApp.terminate, never exit(), and closes sheets first:
-    /// an open sheet refuses terminate, and the run would wait forever.
+    /// Quits through NSApp.terminate, never exit(), and closes sheets first.
     static func finish(code: Int32) {
         exitCode = code
         for window in NSApp.windows { if let sheet = window.attachedSheet { window.endSheet(sheet) } }

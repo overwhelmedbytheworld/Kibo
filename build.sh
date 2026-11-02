@@ -9,6 +9,13 @@
 set -euo pipefail
 here=${0:A:h}
 name="Kibo"
+if [[ -z "${DEVELOPER_DIR:-}" ]]; then
+  if [[ -d "/Applications/Xcode-beta.app/Contents/Developer" ]]; then
+    export DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer"
+  elif [[ -d "/Applications/Xcode.app/Contents/Developer" ]]; then
+    export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+  fi
+fi
 scratch="$HOME/Library/Developer/$name/build"
 config=release
 [[ " $* " == *" --debug "* ]] && config=debug
