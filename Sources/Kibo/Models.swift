@@ -112,6 +112,23 @@ final class AppModel {
 
     init(container: ModelContainer) {
         self.container = container
+        syncTriggerCache()
+    }
+
+    /// Synchronizes the trigger engine's in-memory lookup cache from SwiftData.
+    func syncTriggerCache() {
+        if let snippets = try? container.mainContext.fetch(FetchDescriptor<Snippet>()) {
+            GlobalTriggerEngine.shared.updateTriggers(from: snippets)
+        }
+    }
+
+    /// Updates usage statistics when a trigger expands.
+    func recordSnippetUsage(id: PersistentIdentifier) {
+        if let snippet = try? container.mainContext.fetch(FetchDescriptor<Snippet>()).first(where: { $0.id == id }) {
+            snippet.usageCount += 1
+            snippet.lastUsedAt = .now
+            try? container.mainContext.save()
+        }
     }
 
     func addSnippet(
@@ -130,6 +147,7 @@ final class AppModel {
         container.mainContext.insert(snippet)
         try? container.mainContext.save()
         selection = snippet.id
+        syncTriggerCache()
     }
 
     func duplicateSnippet(_ snippet: Snippet) {
@@ -153,6 +171,7 @@ final class AppModel {
         container.mainContext.insert(clone)
         try? container.mainContext.save()
         selection = clone.id
+        syncTriggerCache()
     }
 
     func deleteSnippet(_ snippet: Snippet) {
@@ -161,6 +180,7 @@ final class AppModel {
         }
         container.mainContext.delete(snippet)
         try? container.mainContext.save()
+        syncTriggerCache()
     }
 
     func toggleFavourite(_ snippet: Snippet) {
@@ -188,19 +208,20 @@ final class AppModel {
     }
 
     func insertSnippetIntoActiveApp(_ snippet: Snippet, values: [String: String]? = nil) {
+        let target = ActiveAppTracker.shared.lastExternalApp
         if let vals = values {
             let substituted = SnippetPlaceholders.substitute(template: snippet.content, with: vals)
             snippet.usageCount += 1
             snippet.lastUsedAt = .now
             try? container.mainContext.save()
-            TextInserter.insert(text: substituted)
+            TextInserter.insert(text: substituted, into: target)
         } else if SnippetPlaceholders.hasPlaceholders(snippet.content) {
             placeholderPromptSnippet = snippet
         } else {
             snippet.usageCount += 1
             snippet.lastUsedAt = .now
             try? container.mainContext.save()
-            TextInserter.insert(text: snippet.content)
+            TextInserter.insert(text: snippet.content, into: target)
         }
     }
 }

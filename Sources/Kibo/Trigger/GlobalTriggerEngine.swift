@@ -4,6 +4,29 @@ import Foundation
 import SwiftData
 import KiboKit
 
+/// Thread-safe in-memory representation of an expansion trigger.
+public struct CachedTrigger: Sendable, Equatable {
+    public let id: PersistentIdentifier
+    public let alias: String
+    public let content: String
+    public let name: String
+    public let hasPlaceholders: Bool
+
+    public init(
+        id: PersistentIdentifier,
+        alias: String,
+        content: String,
+        name: String,
+        hasPlaceholders: Bool
+    ) {
+        self.id = id
+        self.alias = alias
+        self.content = content
+        self.name = name
+        self.hasPlaceholders = hasPlaceholders
+    }
+}
+
 /// Background keystroke monitor for automatic trigger alias expansion (e.g. typing `:email:`).
 @MainActor
 final class GlobalTriggerEngine {
@@ -13,6 +36,10 @@ final class GlobalTriggerEngine {
     private var runLoopSource: CFRunLoopSource?
     private var buffer = ""
     private var lastKeyTime = Date()
+    private weak var model: AppModel?
+
+    /// In-memory cache of triggers to avoid disk I/O and ModelContainer crashes on keystrokes.
+    private var cachedTriggers: [CachedTrigger] = []
 
     private(set) var isRunning = false
 
@@ -20,6 +47,7 @@ final class GlobalTriggerEngine {
 
     /// Starts monitoring keystrokes if Accessibility/Input Monitoring is granted.
     func start(model: AppModel) {
+        self.model = model
         guard !isRunning else { return }
 
         let mask = (1 << CGEventType.keyDown.rawValue)
@@ -61,6 +89,21 @@ final class GlobalTriggerEngine {
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         isRunning = true
+    }
+
+    /// Synchronizes the in-memory trigger cache from the current snippet collection.
+    func updateTriggers(from snippets: [Snippet]) {
+        self.cachedTriggers = snippets.compactMap { snippet in
+            let alias = snippet.alias.trimmingCharacters(in: .whitespaces)
+            guard !alias.isEmpty && alias.count >= 3 else { return nil }
+            return CachedTrigger(
+                id: snippet.id,
+                alias: alias,
+                content: snippet.content,
+                name: snippet.name,
+                hasPlaceholders: SnippetPlaceholders.hasPlaceholders(snippet.content)
+            )
+        }
     }
 
     func stop() {
@@ -123,29 +166,29 @@ final class GlobalTriggerEngine {
     private func checkForTriggerMatch() {
         guard buffer.hasSuffix(":") else { return }
 
-        // Fetch snippets from database
-        let context = Store.makeContainer().mainContext
-        guard let snippets = try? context.fetch(FetchDescriptor<Snippet>()) else { return }
+        // Fast in-memory check without touching SwiftData or disk
+        for trigger in cachedTriggers {
+            guard buffer.hasSuffix(trigger.alias) else { continue }
 
-        for snippet in snippets {
-            let alias = snippet.alias.trimmingCharacters(in: .whitespaces)
-            guard !alias.isEmpty && alias.count >= 4 else { continue }
-
-            if buffer.hasSuffix(alias) {
-                // Match detected!
-                buffer = ""
-                triggerSnippet(snippet: snippet, aliasLength: alias.count)
-                break
-            }
+            // Match detected!
+            buffer = ""
+            triggerSnippet(trigger)
+            break
         }
     }
 
-    private func triggerSnippet(snippet: Snippet, aliasLength: Int) {
-        if SnippetPlaceholders.hasPlaceholders(snippet.content) {
-            FloatingPanelController.shared.show(model: AppModel(container: Store.makeContainer()))
+    private func triggerSnippet(_ trigger: CachedTrigger) {
+        if trigger.hasPlaceholders {
+            // Summon interactive variable prompt with auto-erase on completion
+            FloatingPanelController.shared.showPlaceholderPrompt(
+                snippetName: trigger.name,
+                template: trigger.content,
+                backspacesToErase: trigger.alias.count
+            )
         } else {
-            // Direct expansion: backspace the alias and paste the snippet
-            TextInserter.insert(text: snippet.content, backspaces: aliasLength)
+            // Direct expansion: backspace the typed alias and paste the snippet content
+            TextInserter.insert(text: trigger.content, backspaces: trigger.alias.count)
+            model?.recordSnippetUsage(id: trigger.id)
         }
     }
 }

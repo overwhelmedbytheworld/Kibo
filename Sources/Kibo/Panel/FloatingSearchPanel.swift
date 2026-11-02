@@ -10,12 +10,21 @@ import KiboKit
 final class FloatingPanelController: ObservableObject {
     static let shared = FloatingPanelController()
 
+    struct PlaceholderPromptState: Identifiable {
+        let id = UUID()
+        let snippetName: String
+        let template: String
+        let backspaces: Int
+    }
+
     private var panel: NSPanel?
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
     private(set) var targetApp: NSRunningApplication?
+    private weak var appModel: AppModel?
 
     @Published var isVisible = false
+    @Published var placeholderPrompt: PlaceholderPromptState?
 
     private init() {
         registerGlobalHotKey()
@@ -55,15 +64,20 @@ final class FloatingPanelController: ObservableObject {
     }
 
     func show(model: AppModel) {
+        self.appModel = model
+
         // Record the app that was frontmost before Kibo's panel appears
         let frontApp = NSWorkspace.shared.frontmostApplication
-        if frontApp?.bundleIdentifier != Bundle.main.bundleIdentifier {
-            targetApp = frontApp
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        if let front = frontApp, front.processIdentifier != myPID {
+            targetApp = front
+        } else {
+            targetApp = ActiveAppTracker.shared.lastExternalApp
         }
 
         if panel == nil {
             let p = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 560, height: 380),
+                contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
                 styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
@@ -76,7 +90,8 @@ final class FloatingPanelController: ObservableObject {
             p.backgroundColor = .clear
             p.hasShadow = true
 
-            let rootView = FloatingSearchPanelContent(model: model, controller: self)
+            let rootView = FloatingSearchPanelContent(controller: self)
+                .environment(model)
                 .themed()
 
             let hostingView = NSHostingView(rootView: rootView)
@@ -86,11 +101,11 @@ final class FloatingPanelController: ObservableObject {
 
         guard let p = panel else { return }
 
-        // Center on the active screen's upper third (like Spotlight)
+        // Center on the active screen's upper third (Spotlight position)
         if let screen = NSScreen.main {
             let screenFrame = screen.visibleFrame
             let x = screenFrame.midX - (p.frame.width / 2)
-            let y = screenFrame.maxY - p.frame.height - 140
+            let y = screenFrame.maxY - p.frame.height - 120
             p.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
@@ -99,15 +114,26 @@ final class FloatingPanelController: ObservableObject {
         isVisible = true
     }
 
+    func showPlaceholderPrompt(snippetName: String, template: String, backspacesToErase: Int = 0) {
+        guard let model = appModel else { return }
+        self.placeholderPrompt = PlaceholderPromptState(
+            snippetName: snippetName,
+            template: template,
+            backspaces: backspacesToErase
+        )
+        show(model: model)
+    }
+
     func hide() {
         panel?.orderOut(nil)
         isVisible = false
+        placeholderPrompt = nil
     }
 
     func toggle(model: AppModel? = nil) {
         if isVisible {
             hide()
-        } else if let m = model {
+        } else if let m = model ?? appModel {
             show(model: m)
         }
     }
@@ -116,12 +142,11 @@ final class FloatingPanelController: ObservableObject {
 // MARK: - Floating Search Panel SwiftUI Content
 
 struct FloatingSearchPanelContent: View {
-    let model: AppModel
-    let controller: FloatingPanelController
+    @ObservedObject var controller: FloatingPanelController
+    @Environment(AppModel.self) private var model
 
     @State private var query = ""
     @State private var selectedIndex = 0
-    @State private var activePlaceholderSnippet: Snippet?
 
     @Query(sort: \Snippet.usageCount, order: .reverse) private var allSnippets: [Snippet]
 
@@ -133,16 +158,18 @@ struct FloatingSearchPanelContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let snippet = activePlaceholderSnippet {
+            if let prompt = controller.placeholderPrompt {
                 // Dynamic Variable Filling Mode
                 PlaceholderPromptView(
-                    snippetName: snippet.name,
-                    template: snippet.content,
+                    snippetName: prompt.snippetName,
+                    template: prompt.template,
                     onInsert: { finalContent in
-                        insertSnippet(content: finalContent)
+                        controller.hide()
+                        let target = controller.targetApp
+                        TextInserter.insert(text: finalContent, into: target, backspaces: prompt.backspaces)
                     },
                     onCancel: {
-                        activePlaceholderSnippet = nil
+                        controller.hide()
                     }
                 )
             } else {
@@ -243,23 +270,19 @@ struct FloatingSearchPanelContent: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator, lineWidth: 1))
         .onKeyPress(.downArrow) {
-            if selectedIndex < matchingSnippets.count - 1 {
+            if controller.placeholderPrompt == nil && selectedIndex < matchingSnippets.count - 1 {
                 selectedIndex += 1
             }
             return .handled
         }
         .onKeyPress(.upArrow) {
-            if selectedIndex > 0 {
+            if controller.placeholderPrompt == nil && selectedIndex > 0 {
                 selectedIndex -= 1
             }
             return .handled
         }
         .onKeyPress(.escape) {
-            if activePlaceholderSnippet != nil {
-                activePlaceholderSnippet = nil
-            } else {
-                controller.hide()
-            }
+            controller.hide()
             return .handled
         }
         .onChange(of: query) { _, _ in
@@ -272,7 +295,11 @@ struct FloatingSearchPanelContent: View {
         let snippet = matchingSnippets[selectedIndex]
 
         if SnippetPlaceholders.hasPlaceholders(snippet.content) {
-            activePlaceholderSnippet = snippet
+            controller.placeholderPrompt = FloatingPanelController.PlaceholderPromptState(
+                snippetName: snippet.name,
+                template: snippet.content,
+                backspaces: 0
+            )
         } else {
             insertSnippet(content: snippet.content)
         }
@@ -284,7 +311,6 @@ struct FloatingSearchPanelContent: View {
         TextInserter.insert(text: content, into: target)
         query = ""
         selectedIndex = 0
-        activePlaceholderSnippet = nil
     }
 }
 

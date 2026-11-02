@@ -22,8 +22,9 @@ struct ContentView: View {
                 template: snippet.content,
                 onInsert: { substituted in
                     model.placeholderPromptSnippet = nil
-                    model.insertSnippetIntoActiveApp(snippet, values: [:])
-                    TextInserter.insert(text: substituted)
+                    let target = ActiveAppTracker.shared.lastExternalApp
+                    TextInserter.insert(text: substituted, into: target)
+                    model.recordSnippetUsage(id: snippet.id)
                 },
                 onCancel: {
                     model.placeholderPromptSnippet = nil
@@ -420,9 +421,9 @@ private struct SnippetEditorContent: View {
             }
             .formStyle(.grouped)
         }
-        .onChange(of: snippet.name) { _, _ in snippet.modifiedAt = .now }
-        .onChange(of: snippet.alias) { _, _ in snippet.modifiedAt = .now }
-        .onChange(of: snippet.content) { _, _ in snippet.modifiedAt = .now }
+        .onChange(of: snippet.name) { _, _ in snippet.modifiedAt = .now; model.syncTriggerCache() }
+        .onChange(of: snippet.alias) { _, _ in snippet.modifiedAt = .now; model.syncTriggerCache() }
+        .onChange(of: snippet.content) { _, _ in snippet.modifiedAt = .now; model.syncTriggerCache() }
         .onChange(of: snippet.category) { _, _ in snippet.modifiedAt = .now }
     }
 
