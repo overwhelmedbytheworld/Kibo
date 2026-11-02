@@ -90,7 +90,16 @@ enum SelfTest {
             check("invalid alias too short", !SnippetAlias.isValid(":a:"))
             check("clean wraps and lowercases", SnippetAlias.clean("  MY_PROMPT ") == ":my_prompt:")
 
-            // 7. Deletion & Cleanup
+            // 7. Dynamic Variable Substitution
+            let template = "Hi, my name is {{name}} and I study {{subject:CS}}."
+            check("detects placeholders in template", SnippetPlaceholders.hasPlaceholders(template))
+            let placeholders = SnippetPlaceholders.extract(from: template)
+            check("extracts exactly 2 placeholders", placeholders.count == 2)
+            check("first placeholder is name", placeholders.first?.key == "name")
+            let filled = SnippetPlaceholders.substitute(template: template, with: ["name": "John"])
+            check("substitutes variable with default fallback", filled == "Hi, my name is John and I study CS.")
+
+            // 8. Deletion & Cleanup
             model.deleteSnippet(testSnippet)
             let finalCount = fetchSnippets().count
             check("deleteSnippet restores initial count", finalCount == initialCount)

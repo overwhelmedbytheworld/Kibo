@@ -7,6 +7,7 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        @Bindable var model = model
         NavigationSplitView {
             sidebar
         } content: {
@@ -15,10 +16,27 @@ struct ContentView: View {
         } detail: {
             detailColumn
         }
+        .sheet(item: $model.placeholderPromptSnippet) { snippet in
+            PlaceholderPromptView(
+                snippetName: snippet.name,
+                template: snippet.content,
+                onInsert: { substituted in
+                    model.placeholderPromptSnippet = nil
+                    model.insertSnippetIntoActiveApp(snippet, values: [:])
+                    TextInserter.insert(text: substituted)
+                },
+                onCancel: {
+                    model.placeholderPromptSnippet = nil
+                }
+            )
+        }
         .task {
             SeedData.insertIfRequested(into: model)
             SelfTest.runIfRequested(model: model)
             Snapshot.runIfRequested(model: model, openSettings: openSettings)
+
+            // Start global background trigger engine for typing expansion
+            GlobalTriggerEngine.shared.start(model: model)
         }
     }
 
@@ -69,37 +87,82 @@ struct SnippetListView: View {
     @Query(sort: \Snippet.modifiedAt, order: .reverse) private var allSnippets: [Snippet]
     let filterFavourites: Bool
 
-    /// Distinct categories present in the current snippet collection.
+    /// Distinct categories in the snippet collection.
     private var availableCategories: [String] {
         let base = filterFavourites ? allSnippets.filter(\.isFavourite) : allSnippets
         let cats = Set(base.map(\.category).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
         return cats.sorted()
     }
 
-    /// Visible snippets filtered by search and category.
+    /// Filtered and sorted snippets.
     private var filteredSnippets: [Snippet] {
         let base = filterFavourites ? allSnippets.filter(\.isFavourite) : allSnippets
-        return SnippetSearch.filter(
+        let searched = SnippetSearch.filter(
             items: base,
             query: model.searchText,
             categoryFilter: model.selectedCategory
         ) { snippet in
             (snippet.name, snippet.alias, snippet.category, snippet.content)
         }
+
+        // Apply secondary sort order if query is empty
+        if model.searchText.isEmpty {
+            switch model.sortOrder {
+            case .recentlyModified:
+                return searched.sorted { $0.modifiedAt > $1.modifiedAt }
+            case .nameAscending:
+                return searched.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            case .mostUsed:
+                return searched.sorted { $0.usageCount > $1.usageCount }
+            case .recentlyUsed:
+                return searched.sorted { ($0.lastUsedAt ?? .distantPast) > ($1.lastUsedAt ?? .distantPast) }
+            case .category:
+                return searched.sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
+            }
+        }
+        return searched
     }
 
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            // Category filter chips
-            if !availableCategories.isEmpty {
+            // Category filter pills & Sort header
+            HStack(spacing: Space.xs) {
                 categoryFilterBar
-            }
 
+                Spacer(minLength: 0)
+
+                // Sort Menu
+                Menu {
+                    Picker("Sort By", selection: $model.sortOrder) {
+                        ForEach(SnippetSortOrder.allCases) { order in
+                            Label(order.rawValue, systemImage: order.symbol)
+                                .tag(order)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.caption)
+                        .padding(Space.xs)
+                }
+                .menuStyle(.borderlessButton)
+                .help("Sort snippets by \(model.sortOrder.rawValue)")
+                .padding(.trailing, Space.sm)
+            }
+            .background(.background.secondary)
+            .overlay(Divider(), alignment: .bottom)
+
+            // Snippet Rows List
             List(filteredSnippets, selection: $model.selection) { snippet in
                 SnippetRow(snippet: snippet)
                     .tag(snippet.id)
                     .contextMenu {
+                        Button {
+                            model.insertSnippetIntoActiveApp(snippet)
+                        } label: {
+                            Label("Insert into Active App", systemImage: "arrow.right.doc.on.clipboard")
+                        }
+
                         Button {
                             model.copyToClipboard(snippet)
                         } label: {
@@ -160,6 +223,13 @@ struct SnippetListView: View {
                     Label("New Snippet", systemImage: "plus")
                 }
                 .help("Create a new snippet (⌘N)")
+
+                Button {
+                    FloatingPanelController.shared.show(model: model)
+                } label: {
+                    Label("Quick Search", systemImage: "magnifyingglass")
+                }
+                .help("Open floating search (⌘⇧K)")
             }
         }
     }
@@ -183,8 +253,6 @@ struct SnippetListView: View {
             .padding(.horizontal, Space.sm)
             .padding(.vertical, Space.xs)
         }
-        .background(.background.secondary)
-        .overlay(Divider(), alignment: .bottom)
     }
 
     private func categoryChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
@@ -236,8 +304,20 @@ struct SnippetRow: View {
 
                 if !snippet.category.isEmpty {
                     Text(snippet.category)
-                        .font(.caption)
+                        .font(.caption2)
+                        .padding(.horizontal, Space.xs)
+                        .padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
                         .foregroundStyle(.secondary)
+                }
+
+                if SnippetPlaceholders.hasPlaceholders(snippet.content) {
+                    Text("{{var}}")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
                 }
 
                 Spacer()
@@ -262,7 +342,7 @@ struct SnippetDetailView: View {
     var body: some View {
         if let selectedID = model.selection,
            let snippet = snippets.first(where: { $0.id == selectedID }) {
-            SnippetEditorContent(snippet: snippet)
+            SnippetEditorContent(snippet: snippet, allSnippets: snippets)
         } else {
             ContentUnavailableView(
                 "No Snippet Selected",
@@ -277,6 +357,10 @@ struct SnippetDetailView: View {
 private struct SnippetEditorContent: View {
     @Environment(AppModel.self) private var model
     @Bindable var snippet: Snippet
+    let allSnippets: [Snippet]
+
+    @State private var newCategoryText = ""
+    @State private var showingCategoryInput = false
 
     private var aliasValidation: SnippetAlias.ValidationResult {
         SnippetAlias.validate(snippet.alias)
@@ -284,6 +368,12 @@ private struct SnippetEditorContent: View {
 
     private var isCopied: Bool {
         model.justCopiedUID == snippet.uid
+    }
+
+    private var existingCategories: [String] {
+        let defaultSuggestions = ["Work", "Study", "Code", "Writing", "Prompt", "Personal"]
+        let fromData = allSnippets.map(\.category).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        return Array(Set(defaultSuggestions + fromData)).sorted()
     }
 
     var body: some View {
@@ -303,17 +393,27 @@ private struct SnippetEditorContent: View {
 
                     aliasRow
 
-                    TextField("Category / Tag (e.g. Work, Study, Prompt)", text: $snippet.category)
+                    categoryPillRow
                 }
 
                 Section("Content") {
+                    if SnippetPlaceholders.hasPlaceholders(snippet.content) {
+                        HStack {
+                            Image(systemName: "sparkles")
+                                .foregroundStyle(.orange)
+                            Text("Contains dynamic variables. You will be prompted to fill them in when inserting.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     TextEditor(text: $snippet.content)
                         .font(.system(size: 13, design: .monospaced))
                         .scrollContentBackground(.hidden)
                         .background(Color(nsColor: .textBackgroundColor))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator, lineWidth: 1))
-                        .frame(minHeight: 240)
+                        .frame(minHeight: 220)
 
                     contentFooter
                 }
@@ -330,16 +430,25 @@ private struct SnippetEditorContent: View {
 
     private var editorHeader: some View {
         HStack(spacing: Space.sm) {
-            // Primary Copy button for instant use
+            // Primary Action: Insert directly into active app!
+            Button {
+                model.insertSnippetIntoActiveApp(snippet)
+            } label: {
+                Label("Insert into Active App", systemImage: "arrow.right.doc.on.clipboard")
+            }
+            .buttonStyle(.borderedProminent)
+            .help("Inserts text into whatever application you were working in")
+
+            // Copy button
             Button {
                 model.copyToClipboard(snippet)
             } label: {
                 Label(
-                    isCopied ? "Copied to Clipboard!" : "Copy Snippet",
+                    isCopied ? "Copied!" : "Copy",
                     systemImage: isCopied ? "checkmark" : "doc.on.clipboard"
                 )
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .tint(isCopied ? .green : nil)
             .keyboardShortcut(.return, modifiers: [.command])
             .help("Copy content to clipboard (⌘Return or ⌘C)")
@@ -407,10 +516,96 @@ private struct SnippetEditorContent: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             } else if snippet.alias.isEmpty {
-                Text("Type an alias surrounded by colons (e.g. :email:) to trigger automatic expansion.")
+                Text("Type an alias surrounded by colons (e.g. :email:) to trigger automatic expansion in any app.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    // MARK: - Category Pill & Dropdown Selector
+
+    private var categoryPillRow: some View {
+        HStack(spacing: Space.sm) {
+            Text("Category:")
+                .font(.body)
+
+            if !snippet.category.isEmpty {
+                // Interactive Category Pill with delete icon
+                HStack(spacing: Space.xs) {
+                    Image(systemName: "tag.fill")
+                        .font(.caption2)
+
+                    Text(snippet.category)
+                        .font(.caption.weight(.medium))
+
+                    Button {
+                        snippet.category = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, Space.sm)
+                .padding(.vertical, Space.xs)
+                .background(Palette.accent.opacity(0.15), in: Capsule())
+                .foregroundStyle(Palette.accentText)
+            }
+
+            // Dropdown Menu to choose or change category
+            Menu {
+                ForEach(existingCategories, id: \.self) { cat in
+                    Button {
+                        snippet.category = cat
+                    } label: {
+                        HStack {
+                            Text(cat)
+                            if snippet.category == cat {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+
+                Button("New Category...") {
+                    showingCategoryInput = true
+                }
+            } label: {
+                Label(snippet.category.isEmpty ? "Select Category Pill..." : "Change", systemImage: "chevron.down")
+                    .font(.caption)
+            }
+            .menuStyle(.borderedButton)
+            .controlSize(.small)
+
+            if showingCategoryInput {
+                HStack(spacing: Space.xs) {
+                    TextField("Category name", text: $newCategoryText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 132)
+
+                    Button("Set") {
+                        let trimmed = newCategoryText.trimmingCharacters(in: .whitespaces)
+                        if !trimmed.isEmpty {
+                            snippet.category = trimmed
+                        }
+                        newCategoryText = ""
+                        showingCategoryInput = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+
+                    Button("Cancel") {
+                        showingCategoryInput = false
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            Spacer()
         }
     }
 

@@ -63,6 +63,28 @@ enum SidebarPage: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Sorting
+
+public enum SnippetSortOrder: String, CaseIterable, Identifiable {
+    case recentlyModified = "Recently Modified"
+    case nameAscending = "Name (A-Z)"
+    case mostUsed = "Most Used"
+    case recentlyUsed = "Recently Used"
+    case category = "Category"
+
+    public var id: String { rawValue }
+
+    public var symbol: String {
+        switch self {
+        case .recentlyModified: return "clock"
+        case .nameAscending: return "textformat.abc"
+        case .mostUsed: return "flame"
+        case .recentlyUsed: return "arrow.clockwise"
+        case .category: return "tag"
+        }
+    }
+}
+
 // MARK: - App Model
 
 /// App-wide state that menus, toolbars, and views share.
@@ -73,6 +95,10 @@ final class AppModel {
     var selection: PersistentIdentifier?
     var searchText: String = ""
     var selectedCategory: String? = nil
+    var sortOrder: SnippetSortOrder = .recentlyModified
+
+    /// Active placeholder prompt sheet state.
+    var placeholderPromptSnippet: Snippet? = nil
 
     /// Transient notification when a snippet is copied.
     var justCopiedUID: UUID? = nil
@@ -158,6 +184,23 @@ final class AppModel {
             if self.justCopiedUID == snippet.uid {
                 self.justCopiedUID = nil
             }
+        }
+    }
+
+    func insertSnippetIntoActiveApp(_ snippet: Snippet, values: [String: String]? = nil) {
+        if let vals = values {
+            let substituted = SnippetPlaceholders.substitute(template: snippet.content, with: vals)
+            snippet.usageCount += 1
+            snippet.lastUsedAt = .now
+            try? container.mainContext.save()
+            TextInserter.insert(text: substituted)
+        } else if SnippetPlaceholders.hasPlaceholders(snippet.content) {
+            placeholderPromptSnippet = snippet
+        } else {
+            snippet.usageCount += 1
+            snippet.lastUsedAt = .now
+            try? container.mainContext.save()
+            TextInserter.insert(text: snippet.content)
         }
     }
 }

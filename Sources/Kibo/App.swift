@@ -105,6 +105,11 @@ struct MenuBarMenu: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        Button("Quick Search & Insert") {
+            FloatingPanelController.shared.show(model: model)
+        }
+        .keyboardShortcut("k", modifiers: [.command, .shift])
+
         Button("Open Kibo") {
             openWindow(id: "main")
             NSApp.activate()
