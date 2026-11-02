@@ -4,6 +4,30 @@ import SwiftData
 import SwiftUI
 import KiboKit
 
+// MARK: - Custom Floating Panel with Key Window Support
+
+final class FloatingPanel: NSPanel {
+    init(contentRect: NSRect) {
+        super.init(
+            contentRect: contentRect,
+            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        isFloatingPanel = true
+        level = .popUpMenu // Above all standard windows and full screen apps
+        hidesOnDeactivate = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+    }
+
+    /// Essential for allowing text input inside text fields.
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 // MARK: - Floating Search Panel Controller
 
 @MainActor
@@ -17,7 +41,7 @@ final class FloatingPanelController: ObservableObject {
         let backspaces: Int
     }
 
-    private var panel: NSPanel?
+    private var panel: FloatingPanel?
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
     private(set) var targetApp: NSRunningApplication?
@@ -76,24 +100,16 @@ final class FloatingPanelController: ObservableObject {
         let myPID = ProcessInfo.processInfo.processIdentifier
         if let front = frontApp, front.processIdentifier != myPID {
             targetApp = front
+        } else if let last = ActiveAppTracker.shared.lastExternalApp, last.processIdentifier != myPID {
+            targetApp = last
         } else {
-            targetApp = ActiveAppTracker.shared.lastExternalApp
+            targetApp = NSWorkspace.shared.runningApplications.first(where: {
+                $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != myPID
+            })
         }
 
         if panel == nil {
-            let p = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
-                styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
-                backing: .buffered,
-                defer: false
-            )
-            p.isFloatingPanel = true
-            p.level = .statusBar
-            p.hidesOnDeactivate = false
-            p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-            p.isOpaque = false
-            p.backgroundColor = .clear
-            p.hasShadow = true
+            let p = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 420))
 
             let rootView = FloatingSearchPanelContent(controller: self)
                 .environment(model)
@@ -115,6 +131,8 @@ final class FloatingPanelController: ObservableObject {
         }
 
         p.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+        p.makeKeyAndOrderFront(nil)
         p.makeKey()
         isVisible = true
     }
@@ -161,6 +179,15 @@ struct FloatingSearchPanelContent: View {
         }
     }
 
+    private var matchingEmojis: [EmojiItem] {
+        guard !query.isEmpty else { return [] }
+        return Array(EmojiCatalog.filter(query: query).prefix(8))
+    }
+
+    private var totalItemCount: Int {
+        matchingSnippets.count + matchingEmojis.count
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if let prompt = controller.placeholderPrompt {
@@ -184,7 +211,7 @@ struct FloatingSearchPanelContent: View {
                         .font(.title3)
                         .foregroundStyle(.secondary)
 
-                    TextField("Search snippets by name, :alias:, or keywords...", text: $query)
+                    TextField("Search snippets or type :emoji:...", text: $query)
                         .textFieldStyle(.plain)
                         .font(.title3)
                         .onSubmit {
@@ -213,10 +240,11 @@ struct FloatingSearchPanelContent: View {
                 .background(.ultraThinMaterial)
                 .overlay(Divider(), alignment: .bottom)
 
-                // Results List
+                // Results List (Snippets + Matching Emojis)
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 2) {
+                            // Snippets Section
                             ForEach(Array(matchingSnippets.enumerated()), id: \.element.id) { index, snippet in
                                 FloatingSnippetRow(
                                     snippet: snippet,
@@ -226,6 +254,31 @@ struct FloatingSearchPanelContent: View {
                                 .onTapGesture {
                                     selectedIndex = index
                                     selectCurrent()
+                                }
+                            }
+
+                            // Matching Emojis Section
+                            if !matchingEmojis.isEmpty {
+                                HStack {
+                                    Text("EMOJIS")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, Space.md)
+                                .padding(.top, Space.sm)
+
+                                ForEach(Array(matchingEmojis.enumerated()), id: \.element.emoji) { index, item in
+                                    let globalIndex = matchingSnippets.count + index
+                                    FloatingEmojiRow(
+                                        item: item,
+                                        isSelected: globalIndex == selectedIndex
+                                    )
+                                    .id(globalIndex)
+                                    .onTapGesture {
+                                        selectedIndex = globalIndex
+                                        selectCurrent()
+                                    }
                                 }
                             }
                         }
@@ -238,12 +291,12 @@ struct FloatingSearchPanelContent: View {
                     }
                 }
                 .overlay {
-                    if matchingSnippets.isEmpty {
+                    if matchingSnippets.isEmpty && matchingEmojis.isEmpty {
                         VStack(spacing: Space.xs) {
-                            Text("No matching snippets")
+                            Text("No results")
                                 .font(.headline)
                                 .foregroundStyle(.secondary)
-                            Text("Press ⌘N in Kibo to create one.")
+                            Text("Search snippets by name, or type :emoji: like :fire: or :thumbsup:")
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
@@ -260,7 +313,7 @@ struct FloatingSearchPanelContent: View {
                     Text("esc Cancel")
                     Spacer()
                     if let target = controller.targetApp {
-                        Text("Inserting into: \(target.localizedName ?? "Active App")")
+                        Text("Target: \(target.localizedName ?? "Active App")")
                             .foregroundStyle(Palette.accentText)
                     }
                 }
@@ -275,7 +328,7 @@ struct FloatingSearchPanelContent: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator, lineWidth: 1))
         .onKeyPress(.downArrow) {
-            if controller.placeholderPrompt == nil && selectedIndex < matchingSnippets.count - 1 {
+            if controller.placeholderPrompt == nil && selectedIndex < totalItemCount - 1 {
                 selectedIndex += 1
             }
             return .handled
@@ -296,24 +349,32 @@ struct FloatingSearchPanelContent: View {
     }
 
     private func selectCurrent() {
-        guard selectedIndex >= 0 && selectedIndex < matchingSnippets.count else { return }
-        let snippet = matchingSnippets[selectedIndex]
+        guard selectedIndex >= 0 && selectedIndex < totalItemCount else { return }
 
-        if SnippetPlaceholders.hasPlaceholders(snippet.content) {
-            controller.placeholderPrompt = FloatingPanelController.PlaceholderPromptState(
-                snippetName: snippet.name,
-                template: snippet.content,
-                backspaces: 0
-            )
+        if selectedIndex < matchingSnippets.count {
+            let snippet = matchingSnippets[selectedIndex]
+            if SnippetPlaceholders.hasPlaceholders(snippet.content) {
+                controller.placeholderPrompt = FloatingPanelController.PlaceholderPromptState(
+                    snippetName: snippet.name,
+                    template: snippet.content,
+                    backspaces: 0
+                )
+            } else {
+                insertText(snippet.content)
+            }
         } else {
-            insertSnippet(content: snippet.content)
+            let emojiIndex = selectedIndex - matchingSnippets.count
+            if emojiIndex < matchingEmojis.count {
+                let emojiItem = matchingEmojis[emojiIndex]
+                insertText(emojiItem.emoji)
+            }
         }
     }
 
-    private func insertSnippet(content: String) {
+    private func insertText(_ text: String) {
         controller.hide()
         let target = controller.targetApp
-        TextInserter.insert(text: content, into: target)
+        TextInserter.insert(text: text, into: target)
         query = ""
         selectedIndex = 0
     }
@@ -365,6 +426,38 @@ private struct FloatingSnippetRow: View {
         }
         .padding(.horizontal, Space.md)
         .padding(.vertical, Space.sm)
+        .background(
+            isSelected ? Palette.accent : Color.clear,
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .contentShape(Rectangle())
+    }
+}
+
+private struct FloatingEmojiRow: View {
+    let item: EmojiItem
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: Space.md) {
+            Text(item.emoji)
+                .font(.title2)
+                .frame(width: 32)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(isSelected ? Palette.onAccent : .primary)
+
+                Text(item.aliases.joined(separator: "  "))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(isSelected ? Palette.onAccent.opacity(0.8) : Palette.accentText)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, Space.md)
+        .padding(.vertical, Space.xs)
         .background(
             isSelected ? Palette.accent : Color.clear,
             in: RoundedRectangle(cornerRadius: 8)

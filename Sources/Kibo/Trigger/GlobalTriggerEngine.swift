@@ -166,14 +166,21 @@ final class GlobalTriggerEngine {
     private func checkForTriggerMatch() {
         guard buffer.hasSuffix(":") else { return }
 
-        // Fast in-memory check without touching SwiftData or disk
+        // 1. Fast in-memory check against user snippet triggers first
         for trigger in cachedTriggers {
             guard buffer.hasSuffix(trigger.alias) else { continue }
 
             // Match detected!
             buffer = ""
             triggerSnippet(trigger)
-            break
+            return
+        }
+
+        // 2. Instant Emoji Expansion! (e.g. :fire: -> 🔥, :thumbs_up: / :thumbsup: -> 👍)
+        if let emojiMatch = EmojiCatalog.findMatch(in: buffer) {
+            buffer = ""
+            TextInserter.insert(text: emojiMatch.emoji, backspaces: emojiMatch.alias.count)
+            return
         }
     }
 

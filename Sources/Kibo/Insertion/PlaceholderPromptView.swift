@@ -9,6 +9,7 @@ struct PlaceholderPromptView: View {
     let onCancel: () -> Void
 
     @State private var values: [String: String] = [:]
+    @FocusState private var focusedKey: String?
     private let placeholders: [SnippetPlaceholders.Placeholder]
 
     init(
@@ -35,7 +36,7 @@ struct PlaceholderPromptView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(snippetName)
                         .font(.headline)
-                    Text("Fill in the placeholder variables to insert")
+                    Text("Fill in the placeholder variables to insert into your active app")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -66,6 +67,7 @@ struct PlaceholderPromptView: View {
                                 )
                             )
                             .textFieldStyle(.roundedBorder)
+                            .focused($focusedKey, equals: p.key)
                             .onSubmit {
                                 onInsert(substitutedResult)
                             }
@@ -88,7 +90,12 @@ struct PlaceholderPromptView: View {
 
             // Footer
             HStack {
+                Text("Press ↵ Enter to insert directly into active app")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
                 Spacer()
+
                 Button("Insert Text") {
                     onInsert(substitutedResult)
                 }
@@ -105,6 +112,12 @@ struct PlaceholderPromptView: View {
             for p in placeholders {
                 if let def = p.defaultValue {
                     values[p.key] = def
+                }
+            }
+            if let first = placeholders.first?.key {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(60))
+                    focusedKey = first
                 }
             }
         }

@@ -136,10 +136,17 @@ enum SelfTest {
             model.deleteClipboardEntry(clip)
             check("deleteClipboardEntry removes entry", fetchClippings().count == initialClippingsCount)
 
-            // 9. Insights / Statistics
+            // 9. Emoji Catalog & Multi-Alias Matching
+            check("emoji lookup :fire: -> 🔥", EmojiCatalog.findMatch(in: ":fire:")?.emoji == "🔥")
+            check("emoji lookup :thumbs_up: -> 👍", EmojiCatalog.findMatch(in: ":thumbs_up:")?.emoji == "👍")
+            check("emoji lookup :thumbsup: -> 👍", EmojiCatalog.findMatch(in: ":thumbsup:")?.emoji == "👍")
+            check("modern apple emoji :salute: -> 🫡", EmojiCatalog.findMatch(in: ":salute:")?.emoji == "🫡")
+            check("modern apple emoji :heart_on_fire: -> ❤️‍🔥", EmojiCatalog.findMatch(in: ":heart_on_fire:")?.emoji == "❤️‍🔥")
+
+            // 10. Insights / Statistics
             check("stats page defined in sidebar", SidebarPage.allCases.contains(.stats))
 
-            // 10. Deletion & Cleanup
+            // 11. Deletion & Cleanup
             if let converted = snippetsAfterConvert.first(where: { $0.content == "Testing Kibo Clipboard Monitor" }) {
                 model.deleteSnippet(converted)
             }
