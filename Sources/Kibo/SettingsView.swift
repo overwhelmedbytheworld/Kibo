@@ -96,6 +96,52 @@ struct GeneralSettings: View {
                 set: { SoundFeedback.isEnabled = $0 }
             ))
         }
+
+        Section("Inline Suggestions (:emoji: bar)") {
+            Toggle("Show inline suggestion bar when typing :shortcode", isOn: Binding(
+                get: { InlineSuggestionController.isInlineSuggestionEnabled },
+                set: { InlineSuggestionController.isInlineSuggestionEnabled = $0 }
+            ))
+
+            Text("Shows a floating WhatsApp-style horizontal suggestion bar as you type :shortcodes like :fire or :rose.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Disable Inline Suggestions in Apps") {
+            Text("Some apps already have built-in shortcode pickers. Disable Kibo's suggestion bar in these apps to prevent duplicate or conflicting popups:")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("WhatsApp", isOn: Binding(
+                get: {
+                    InlineSuggestionController.excludedBundleIDs.contains("net.whatsapp.WhatsApp")
+                },
+                set: { isExcluded in
+                    InlineSuggestionController.setAppExcluded(bundleID: "net.whatsapp.WhatsApp", isExcluded: isExcluded)
+                    InlineSuggestionController.setAppExcluded(bundleID: "net.whatsapp.WhatsApp.mac", isExcluded: isExcluded)
+                }
+            ))
+
+            Toggle("Discord", isOn: Binding(
+                get: {
+                    InlineSuggestionController.excludedBundleIDs.contains("com.hnc.Discord")
+                },
+                set: { isExcluded in
+                    InlineSuggestionController.setAppExcluded(bundleID: "com.hnc.Discord", isExcluded: isExcluded)
+                    InlineSuggestionController.setAppExcluded(bundleID: "com.discord", isExcluded: isExcluded)
+                }
+            ))
+
+            Toggle("Slack", isOn: Binding(
+                get: {
+                    InlineSuggestionController.excludedBundleIDs.contains("com.tinyspeck.slackmacgap")
+                },
+                set: { isExcluded in
+                    InlineSuggestionController.setAppExcluded(bundleID: "com.tinyspeck.slackmacgap", isExcluded: isExcluded)
+                }
+            ))
+        }
     }
 }
 

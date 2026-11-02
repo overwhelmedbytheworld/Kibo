@@ -159,9 +159,14 @@ public enum EmojiCatalog {
             return [direct] + others
         }
 
-        let clean = trimmed.lowercased().replacingOccurrences(of: ":", with: "")
-        let condensed = clean.replacingOccurrences(of: "_", with: "").replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
-        let queryWords = clean.split(whereSeparator: { $0.isWhitespace || $0 == "_" || $0 == "-" }).map(String.init)
+        let rawClean = trimmed.lowercased().replacingOccurrences(of: ":", with: "")
+        let noiseWords: Set<String> = ["emoji", "emojis", "emote", "emotes", "symbol", "icon"]
+        let rawWords = rawClean.split(whereSeparator: { $0.isWhitespace || $0 == "_" || $0 == "-" }).map(String.init)
+        let meaningfulWords = rawWords.filter { !noiseWords.contains($0) }
+        let queryWords = meaningfulWords.isEmpty ? rawWords : meaningfulWords
+
+        let clean = queryWords.joined(separator: " ")
+        let condensed = clean.replacingOccurrences(of: " ", with: "")
 
         var scoredItems: [(item: EmojiItem, score: Int)] = []
 
@@ -170,61 +175,65 @@ public enum EmojiCatalog {
             let itemNameLower = item.name.lowercased()
             let itemCondensedName = itemNameLower.replacingOccurrences(of: "_", with: "").replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
 
-            // 1. Exact alias match (e.g. "thumbs_up" or "thumbsup")
-            if item.aliases.contains(where: {
-                let stripped = $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).lowercased()
-                let strippedCondensed = stripped.replacingOccurrences(of: "_", with: "").replacingOccurrences(of: "-", with: "")
-                return stripped == clean || strippedCondensed == condensed
-            }) {
-                score += 2000
+            let cleanAliases = item.aliases.map {
+                $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).lowercased()
+            }
+            let condAliases = cleanAliases.map {
+                $0.replacingOccurrences(of: "_", with: "").replacingOccurrences(of: "-", with: "")
+            }
+
+            // 1. Exact alias match (e.g. "pray", "thumbs_up", "thumbsup")
+            if cleanAliases.contains(clean) || condAliases.contains(condensed) {
+                score += 5000
             }
 
             // 2. Exact name match
             if itemNameLower == clean || itemCondensedName == condensed {
-                score += 1800
+                score += 4500
             }
 
             // 3. Name prefix match
             if itemNameLower.hasPrefix(clean) || itemCondensedName.hasPrefix(condensed) {
-                score += 1400
+                score += 3500
             }
 
             // 4. Alias prefix match
-            if item.aliases.contains(where: {
-                let stripped = $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).lowercased()
-                return stripped.hasPrefix(clean) || stripped.replacingOccurrences(of: "_", with: "").hasPrefix(condensed)
-            }) {
-                score += 1200
+            if cleanAliases.contains(where: { $0.hasPrefix(clean) }) || condAliases.contains(where: { $0.hasPrefix(condensed) }) {
+                score += 3000
             }
 
-            // 5. All query words match in name or keywords
+            // 5. All query words match in name, keywords, or aliases
             if !queryWords.isEmpty {
                 let allWordsMatch = queryWords.allSatisfy { word in
                     itemNameLower.contains(word) ||
                     item.keywords.contains(where: { $0.contains(word) }) ||
-                    item.aliases.contains(where: { $0.contains(word) })
+                    cleanAliases.contains(where: { $0.contains(word) })
                 }
                 if allWordsMatch {
-                    score += 1000
+                    score += 2000
                 }
             }
 
-            // 6. Partial keyword or name substring match
+            // 6. Word-level scoring
             for word in queryWords {
-                if item.keywords.contains(where: { $0 == word }) {
-                    score += 500
+                if cleanAliases.contains(word) {
+                    score += 1500
+                } else if item.keywords.contains(word) {
+                    score += 1000
                 } else if item.keywords.contains(where: { $0.contains(word) }) {
-                    score += 250
+                    score += 500
+                } else if itemNameLower.contains(word) {
+                    score += 800
                 }
             }
 
             if itemNameLower.contains(clean) {
-                score += 350
+                score += 400
             }
 
             // 7. Usage frequency bonus
             if let usage = usageCounts[item.emoji], usage > 0 {
-                score += min(usage * 20, 500)
+                score += min(usage * 50, 1000)
             }
 
             if score > 0 {

@@ -36,6 +36,9 @@ public final class ActiveAppTracker {
             if app.processIdentifier != myPID {
                 Task { @MainActor in
                     self?.lastExternalApp = app
+                    if InlineSuggestionController.isAppExcluded(bundleID: app.bundleIdentifier, appName: app.localizedName) {
+                        InlineSuggestionController.shared.hide()
+                    }
                 }
             }
         }

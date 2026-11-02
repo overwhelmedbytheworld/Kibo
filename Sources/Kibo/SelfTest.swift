@@ -143,19 +143,28 @@ enum SelfTest {
             check("modern apple emoji :salute: -> 🫡", EmojiCatalog.findMatch(in: ":salute:")?.emoji == "🫡")
             check("modern apple emoji :heart_on_fire: -> ❤️‍🔥", EmojiCatalog.findMatch(in: ":heart_on_fire:")?.emoji == "❤️‍🔥")
             check("emoji search 'rose' ranks 🌹 first", EmojiCatalog.filter(query: "rose").first?.emoji == "🌹")
+            check("emoji search 'rose emoji' ranks 🌹 first", EmojiCatalog.filter(query: "rose emoji").first?.emoji == "🌹")
             check("emoji search 'thumbs up' finds 👍 first", EmojiCatalog.filter(query: "thumbs up").first?.emoji == "👍")
+            check("emoji search 'thumbs up emoji' finds 👍 first", EmojiCatalog.filter(query: "thumbs up emoji").first?.emoji == "👍")
+            check("emoji search 'pray' finds 🙏 first", EmojiCatalog.filter(query: "pray").first?.emoji == "🙏")
+            check("emoji search 'pray emoji' finds 🙏 first", EmojiCatalog.filter(query: "pray emoji").first?.emoji == "🙏")
+            check("emoji search 'fire emoji' finds 🔥 first", EmojiCatalog.filter(query: "fire emoji").first?.emoji == "🔥")
             check("emoji search 'shrug' finds 🤷", EmojiCatalog.filter(query: "shrug").first?.emoji == "🤷")
             check("emoji catalog has full dataset >= 1700", EmojiCatalog.all.count >= 1700)
             check("emoji reverse-engineer pasted '🌹' succeeds", EmojiCatalog.reverseEngineer(input: "🌹")?.emoji == "🌹")
             check("emoji reverse-engineer arbitrary emoji '🫨' succeeds", EmojiCatalog.reverseEngineer(input: "🫨") != nil)
             check("emojis tab defined in sidebar", SidebarPage.allCases.contains(.emojis))
 
-            // 10. Frequency Tracking, Inline Suggestions & Audio Feedback
+            // 10. Frequency Tracking, Inline Suggestions, App Exclusions & Audio Feedback
             EmojiUsageTracker.shared.recordUsage(emoji: "🔥")
             check("emoji usage records count", EmojiUsageTracker.shared.usageCount(for: "🔥") > 0)
             check("topEmojis includes fire", EmojiUsageTracker.shared.topEmojis(limit: 5).contains(where: { $0.emoji == "🔥" }))
             check("sound feedback enabled by default", SoundFeedback.isEnabled)
             check("inline suggestion controller instantiated", !InlineSuggestionController.shared.isVisible)
+            check("inline suggestions excluded in WhatsApp by default", InlineSuggestionController.isAppExcluded(bundleID: "net.whatsapp.WhatsApp", appName: "WhatsApp"))
+            check("inline suggestions excluded in Discord by default", InlineSuggestionController.isAppExcluded(bundleID: "com.hnc.Discord", appName: "Discord"))
+            check("inline suggestions excluded in Slack by default", InlineSuggestionController.isAppExcluded(bundleID: "com.tinyspeck.slackmacgap", appName: "Slack"))
+            check("inline suggestions enabled in Safari by default", !InlineSuggestionController.isAppExcluded(bundleID: "com.apple.Safari", appName: "Safari"))
 
             // 10. Insights / Statistics
             check("stats page defined in sidebar", SidebarPage.allCases.contains(.stats))

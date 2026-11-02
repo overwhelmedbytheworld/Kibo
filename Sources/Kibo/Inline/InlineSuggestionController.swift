@@ -31,6 +31,66 @@ final class InlineSuggestionPanel: NSPanel {
 public final class InlineSuggestionController: ObservableObject {
     public static let shared = InlineSuggestionController()
 
+    public static let defaultExcludedBundles: [String] = [
+        "net.whatsapp.WhatsApp",
+        "net.whatsapp.WhatsApp.mac",
+        "com.tinyspeck.slackmacgap",
+        "com.hnc.Discord",
+        "com.discord"
+    ]
+
+    public static var isInlineSuggestionEnabled: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: "kibo.inline.enabled") == nil {
+                return true
+            }
+            return UserDefaults.standard.bool(forKey: "kibo.inline.enabled")
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "kibo.inline.enabled")
+        }
+    }
+
+    public static var excludedBundleIDs: Set<String> {
+        get {
+            if let saved = UserDefaults.standard.array(forKey: "kibo.inline.excluded_bundles") as? [String] {
+                return Set(saved)
+            }
+            return Set(defaultExcludedBundles)
+        }
+        set {
+            UserDefaults.standard.set(Array(newValue), forKey: "kibo.inline.excluded_bundles")
+        }
+    }
+
+    public static func isAppExcluded(bundleID: String?, appName: String?) -> Bool {
+        guard isInlineSuggestionEnabled else { return true }
+        let excluded = excludedBundleIDs
+        if let bid = bundleID?.lowercased() {
+            if excluded.contains(where: { $0.lowercased() == bid }) { return true }
+            if bid.contains("whatsapp") || bid.contains("discord") || bid.contains("slack") {
+                if excluded.contains(where: { bid.contains($0.lowercased()) }) { return true }
+            }
+        }
+        if let name = appName?.lowercased() {
+            if excluded.contains(where: { $0.lowercased() == name }) { return true }
+            if name.contains("whatsapp") && excluded.contains(where: { $0.lowercased().contains("whatsapp") }) { return true }
+            if name.contains("discord") && excluded.contains(where: { $0.lowercased().contains("discord") }) { return true }
+            if name.contains("slack") && excluded.contains(where: { $0.lowercased().contains("slack") }) { return true }
+        }
+        return false
+    }
+
+    public static func setAppExcluded(bundleID: String, isExcluded: Bool) {
+        var current = excludedBundleIDs
+        if isExcluded {
+            current.insert(bundleID)
+        } else {
+            current.remove(bundleID)
+        }
+        excludedBundleIDs = current
+    }
+
     @Published public var isVisible: Bool = false
     @Published public var suggestions: [InlineSuggestionItem] = []
     @Published public var selectedIndex: Int = 0
@@ -47,6 +107,12 @@ public final class InlineSuggestionController: ObservableObject {
         trigger: String,
         targetApp: NSRunningApplication? = nil
     ) {
+        let app = targetApp ?? ActiveAppTracker.shared.lastExternalApp ?? NSWorkspace.shared.frontmostApplication
+        if Self.isAppExcluded(bundleID: app?.bundleIdentifier, appName: app?.localizedName) {
+            hide()
+            return
+        }
+
         guard !suggestions.isEmpty else {
             hide()
             return

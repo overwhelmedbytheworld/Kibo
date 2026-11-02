@@ -90,6 +90,10 @@ struct EmojiCatalogTests {
     func commonQueries() {
         #expect(EmojiCatalog.filter(query: "shrug").first?.emoji == "🤷")
         #expect(EmojiCatalog.filter(query: "pray").first?.emoji == "🙏")
+        #expect(EmojiCatalog.filter(query: "pray emoji").first?.emoji == "🙏")
+        #expect(EmojiCatalog.filter(query: "thumbs up emoji").first?.emoji == "👍")
+        #expect(EmojiCatalog.filter(query: "fire emoji").first?.emoji == "🔥")
+        #expect(EmojiCatalog.filter(query: "rose emoji").first?.emoji == "🌹")
         #expect(EmojiCatalog.filter(query: "coffee").first?.emoji == "☕")
         #expect(EmojiCatalog.filter(query: "pizza").first?.emoji == "🍕")
         #expect(EmojiCatalog.all.count >= 1700)

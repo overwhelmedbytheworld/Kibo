@@ -217,6 +217,18 @@ final class GlobalTriggerEngine {
 
     /// Evaluates whether the current typing buffer matches any partial shortcode (e.g. ":fi" or ":smil").
     private func evaluateInlineSuggestions() {
+        guard InlineSuggestionController.isInlineSuggestionEnabled else {
+            InlineSuggestionController.shared.hide()
+            return
+        }
+
+        let frontApp = ActiveAppTracker.shared.lastExternalApp ?? NSWorkspace.shared.frontmostApplication
+        if let target = frontApp,
+           InlineSuggestionController.isAppExcluded(bundleID: target.bundleIdentifier, appName: target.localizedName) {
+            InlineSuggestionController.shared.hide()
+            return
+        }
+
         guard let lastColonIndex = buffer.lastIndex(of: ":") else {
             InlineSuggestionController.shared.hide()
             return

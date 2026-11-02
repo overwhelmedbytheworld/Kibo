@@ -1,9 +1,9 @@
 # Kibo — Project Status
 
-## Current Milestone: Phase 5 — Clipboard History & Hardened Universal Insertion (COMPLETE)
+## Current Milestone: Phase 7 — App Exclusions, ⌘⇧K Navigation & Multi-Word Search Perfection (COMPLETE)
 
 ### Vision & Objective
-Build a lightweight, exceptionally fast, keyboard-first macOS productivity utility combining clipboard history, prompt management, text snippets, and universal text insertion, following the BAMA framework.
+Build a lightweight, exceptionally fast, keyboard-first macOS productivity utility combining clipboard history, prompt management, text snippets, universal text insertion, and seamless emoji expansions, following the BAMA framework.
 
 ### Status & Progress
 - [x] **Phase 0 — Product & Architecture Planning**
@@ -53,12 +53,31 @@ Build a lightweight, exceptionally fast, keyboard-first macOS productivity utili
     - Filter pills (`All`, `Pinned`).
     - Quick actions: "Insert into Active App", "Copy Again" (`⌘C`), "Pin / Unpin" (`⌘P`), "Save as Reusable Snippet" (`⌘⇧S`), "Delete" (`⌘⌫`), and "Clear Unpinned History".
     - Rich inspector detail view with syntax typography and metadata.
+- [x] **Phase 6 — Emoji System, Telemetry, WhatsApp HUD & Audio Feedback**
+  - 1,780+ macOS Unicode emoji catalog with fast base64-packed table.
+  - WhatsApp-style floating horizontal suggestion bar (`InlineSuggestionBarView`).
+  - Audio feedback clicks (`SoundFeedback.swift`) on keystroke expansion.
+  - Frequency ranking tracker (`EmojiUsageTracker.swift`) persisting usage counts.
+  - Direct emoji browser tab and reverse-engineering inspector (`EmojiBrowserView.swift`).
+- [x] **Phase 7 — App Exclusions, Arrow Navigation & Search Overhaul**
+  - **App Exclusions**:
+    - Excluded WhatsApp, Discord, and Slack by default to prevent clashes with their native autocompletion.
+    - Configurable in Settings (`GeneralSettings`) with global toggle and individual app exclusion switches.
+    - Live focus detection via `ActiveAppTracker` auto-hiding the suggestion bar when switching into excluded apps.
+  - **⌘⇧K HUD Arrow & Return Navigation**:
+    - `FloatingPanel.sendEvent` window-level key dispatch intercepting Down Arrow (125), Up Arrow (126), Return (36), and Escape (53).
+    - Prevents focused `TextField` from swallowing arrow keys.
+    - Return commits and inserts selection into the pre-recorded target application.
+  - **Initial ⌘⇧K View & Multi-Word Search**:
+    - On empty search, shows full library of frequently used snippets & emojis sorted by usage counts.
+    - Noise-word sanitization in `EmojiCatalog.filter` (e.g. "pray emoji" $\to$ `🙏`, "thumbs up emoji" $\to$ `👍`, "fire emoji" $\to$ `🔥`, "rose emoji" $\to$ `🌹`).
+    - Model container properly injected into `FloatingPanel` hosting view.
 - [x] **Double-Verification Quality Bar**:
-  - `swift test`: 16/16 unit tests passing across all suites.
-  - `tools/selftest.sh`: 33/33 automated in-app assertions passing.
+  - `swift test`: 28/28 unit tests passing across all suites.
+  - `tools/selftest.sh`: 61/61 automated in-app assertions passing.
   - `tools/grid-lint.sh`: 100% compliant with 4pt layout grid.
-  - `tools/snap.sh`: 12 light and dark UI window snapshots captured in `/tmp/Kibo-shots/`.
-  - `tools/check-layout.swift`: 12/12 passing layout probes.
+  - `tools/snap.sh`: 16 light and dark UI window snapshots captured in `/tmp/Kibo-shots/`.
+  - `tools/check-layout.swift`: passing all layout probes.
 
 ### Key Technical Decisions
 1. **Universal Insertion Cadence**: Uses explicit Command key down, V key down (25ms hold duration), V key up, and Command key up, paired with `yieldActivation(to:)` and `NSApp.hide(nil)` when invoked from Kibo.

@@ -7,6 +7,8 @@ import KiboKit
 // MARK: - Custom Floating Panel with Key Window Support
 
 final class FloatingPanel: NSPanel {
+    var onKeyDown: ((NSEvent) -> Bool)?
+
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
@@ -26,6 +28,15 @@ final class FloatingPanel: NSPanel {
     /// Essential for allowing text input inside text fields.
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown {
+            if let onKeyDown, onKeyDown(event) {
+                return
+            }
+        }
+        super.sendEvent(event)
+    }
 }
 
 // MARK: - Floating Search Panel Controller
@@ -49,6 +60,11 @@ final class FloatingPanelController: ObservableObject {
 
     @Published var isVisible = false
     @Published var placeholderPrompt: PlaceholderPromptState?
+    @Published var selectedIndex: Int = 0
+
+    var onCommit: (() -> Void)?
+    var onMoveDown: (() -> Void)?
+    var onMoveUp: (() -> Void)?
 
     private init() {
         registerGlobalHotKey()
@@ -94,6 +110,7 @@ final class FloatingPanelController: ObservableObject {
 
     func show(model: AppModel) {
         self.appModel = model
+        self.selectedIndex = 0
 
         // Record the app that was frontmost before Kibo's panel appears
         let frontApp = NSWorkspace.shared.frontmostApplication
@@ -110,9 +127,46 @@ final class FloatingPanelController: ObservableObject {
 
         if panel == nil {
             let p = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 580, height: 440))
+            p.onKeyDown = { [weak self] event in
+                guard let self else { return false }
+                if self.placeholderPrompt != nil {
+                    if event.keyCode == 53 { // Escape
+                        self.hide()
+                        return true
+                    }
+                    return false
+                }
+
+                switch event.keyCode {
+                case 125: // Down Arrow
+                    if let onMoveDown = self.onMoveDown {
+                        onMoveDown()
+                        return true
+                    }
+                    return false
+                case 126: // Up Arrow
+                    if let onMoveUp = self.onMoveUp {
+                        onMoveUp()
+                        return true
+                    }
+                    return false
+                case 36: // Return
+                    if let onCommit = self.onCommit {
+                        onCommit()
+                        return true
+                    }
+                    return false
+                case 53: // Escape
+                    self.hide()
+                    return true
+                default:
+                    return false
+                }
+            }
 
             let rootView = FloatingSearchPanelContent(controller: self)
                 .environment(model)
+                .modelContainer(model.container)
                 .themed()
 
             let hostingView = NSHostingView(rootView: rootView)
@@ -183,7 +237,6 @@ struct FloatingSearchPanelContent: View {
     @Environment(AppModel.self) private var model
 
     @State private var query = ""
-    @State private var selectedIndex = 0
     @FocusState private var isSearchFocused: Bool
 
     @Query(sort: \Snippet.usageCount, order: .reverse) private var allSnippets: [Snippet]
@@ -202,12 +255,39 @@ struct FloatingSearchPanelContent: View {
         let usage = EmojiUsageTracker.shared.getCounts()
 
         if trimmed.isEmpty {
-            let topEmojis = EmojiUsageTracker.shared.topEmojis(limit: 6).map { PanelItem.emoji($0) }
-            let topSnippets = allSnippets.sorted {
+            // Merge frequently used snippets and emojis, ranked by frequency
+            let sortedSnippets = allSnippets.sorted {
                 if $0.usageCount != $1.usageCount { return $0.usageCount > $1.usageCount }
                 return ($0.lastUsedAt ?? .distantPast) > ($1.lastUsedAt ?? .distantPast)
-            }.prefix(6).map { PanelItem.snippet($0) }
-            return topEmojis + Array(topSnippets)
+            }
+
+            let topEmojis = EmojiUsageTracker.shared.topEmojis(limit: 50)
+
+            // Any emojis with usage > 0 and snippets with usage > 0
+            let usedEmojis = topEmojis.filter { (usage[$0.emoji] ?? 0) > 0 }
+            let usedSnippets = sortedSnippets.filter { $0.usageCount > 0 }
+
+            var highUsage: [(item: PanelItem, count: Int)] = []
+            for e in usedEmojis {
+                highUsage.append((.emoji(e), usage[e.emoji] ?? 0))
+            }
+            for s in usedSnippets {
+                highUsage.append((.snippet(s), s.usageCount))
+            }
+            highUsage.sort { $0.count > $1.count }
+
+            var items: [PanelItem] = []
+            items.append(contentsOf: highUsage.map(\.item))
+
+            // Append remaining snippets
+            let unusedSnippets = sortedSnippets.filter { $0.usageCount == 0 }
+            items.append(contentsOf: unusedSnippets.map { PanelItem.snippet($0) })
+
+            // Append top popular emojis
+            let unusedEmojis = topEmojis.filter { (usage[$0.emoji] ?? 0) == 0 }
+            items.append(contentsOf: unusedEmojis.map { PanelItem.emoji($0) })
+
+            return items
         }
 
         let emojiMatches = EmojiCatalog.filter(query: trimmed, usageCounts: usage)
@@ -225,25 +305,27 @@ struct FloatingSearchPanelContent: View {
 
         if isExplicitEmoji {
             // Emojis first, then snippets
-            let emojis = emojiMatches.prefix(8).map { PanelItem.emoji($0) }
-            let snippets = snippetMatches.prefix(4).map { PanelItem.snippet($0) }
-            return Array(emojis) + Array(snippets)
+            let emojis = emojiMatches.prefix(40).map { PanelItem.emoji($0) }
+            let snippets = snippetMatches.map { PanelItem.snippet($0) }
+            return Array(emojis) + snippets
+        } else if let topEmoji = emojiMatches.first,
+                  topEmoji.aliases.contains(where: { $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame }) ||
+                  topEmoji.name.localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame ||
+                  topEmoji.keywords.contains(cleanQuery) {
+            // Strong emoji match (e.g. searching "pray", "fire", "rose", "thumbs up")
+            let exactEmoji = PanelItem.emoji(topEmoji)
+            let otherEmojis = emojiMatches.dropFirst().prefix(35).map { PanelItem.emoji($0) }
+            let snippets = snippetMatches.map { PanelItem.snippet($0) }
+            return [exactEmoji] + otherEmojis + snippets
+        } else if !snippetMatches.isEmpty {
+            // Snippets match best
+            let snippets = snippetMatches.map { PanelItem.snippet($0) }
+            let emojis = emojiMatches.prefix(35).map { PanelItem.emoji($0) }
+            return snippets + Array(emojis)
         } else {
-            // Check if top emoji has a strong match
-            if let topEmoji = emojiMatches.first,
-               topEmoji.aliases.contains(where: { $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame }) ||
-               topEmoji.name.localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame ||
-               topEmoji.keywords.contains(cleanQuery) {
-                let exactEmoji = PanelItem.emoji(topEmoji)
-                let otherEmojis = emojiMatches.dropFirst().prefix(4).map { PanelItem.emoji($0) }
-                let snippets = snippetMatches.prefix(6).map { PanelItem.snippet($0) }
-                return [exactEmoji] + Array(snippets) + Array(otherEmojis)
-            } else {
-                // Snippets first, then emojis
-                let snippets = snippetMatches.prefix(6).map { PanelItem.snippet($0) }
-                let emojis = emojiMatches.prefix(6).map { PanelItem.emoji($0) }
-                return Array(snippets) + Array(emojis)
-            }
+            // Emojis match
+            let emojis = emojiMatches.prefix(50).map { PanelItem.emoji($0) }
+            return Array(emojis)
         }
     }
 
@@ -275,6 +357,18 @@ struct FloatingSearchPanelContent: View {
                         .font(.title3)
                         .foregroundStyle(.white)
                         .focused($isSearchFocused)
+                        .onKeyPress(.downArrow) {
+                            if controller.selectedIndex < searchResults.count - 1 {
+                                controller.selectedIndex += 1
+                            }
+                            return .handled
+                        }
+                        .onKeyPress(.upArrow) {
+                            if controller.selectedIndex > 0 {
+                                controller.selectedIndex -= 1
+                            }
+                            return .handled
+                        }
                         .onSubmit {
                             selectCurrent()
                         }
@@ -313,21 +407,21 @@ struct FloatingSearchPanelContent: View {
                                 case .snippet(let snippet):
                                     FloatingSnippetRow(
                                         snippet: snippet,
-                                        isSelected: index == selectedIndex
+                                        isSelected: index == controller.selectedIndex
                                     )
                                     .id(index)
                                     .onTapGesture {
-                                        selectedIndex = index
+                                        controller.selectedIndex = index
                                         selectCurrent()
                                     }
                                 case .emoji(let emojiItem):
                                     FloatingEmojiRow(
                                         item: emojiItem,
-                                        isSelected: index == selectedIndex
+                                        isSelected: index == controller.selectedIndex
                                     )
                                     .id(index)
                                     .onTapGesture {
-                                        selectedIndex = index
+                                        controller.selectedIndex = index
                                         selectCurrent()
                                     }
                                 }
@@ -337,7 +431,7 @@ struct FloatingSearchPanelContent: View {
                     }
                     .frame(maxHeight: 320)
                     .background(Color(red: 0.11, green: 0.12, blue: 0.14))
-                    .onChange(of: selectedIndex) { _, newIndex in
+                    .onChange(of: controller.selectedIndex) { _, newIndex in
                         proxy.scrollTo(newIndex, anchor: .center)
                     }
                 }
@@ -388,16 +482,22 @@ struct FloatingSearchPanelContent: View {
         )
         .onAppear {
             isSearchFocused = true
+            setupControllerCallbacks()
+        }
+        .onChange(of: searchResults.count) { _, newCount in
+            if controller.selectedIndex >= newCount {
+                controller.selectedIndex = max(0, newCount - 1)
+            }
         }
         .onKeyPress(.downArrow) {
-            if controller.placeholderPrompt == nil && selectedIndex < searchResults.count - 1 {
-                selectedIndex += 1
+            if controller.placeholderPrompt == nil && controller.selectedIndex < searchResults.count - 1 {
+                controller.selectedIndex += 1
             }
             return .handled
         }
         .onKeyPress(.upArrow) {
-            if controller.placeholderPrompt == nil && selectedIndex > 0 {
-                selectedIndex -= 1
+            if controller.placeholderPrompt == nil && controller.selectedIndex > 0 {
+                controller.selectedIndex -= 1
             }
             return .handled
         }
@@ -406,14 +506,30 @@ struct FloatingSearchPanelContent: View {
             return .handled
         }
         .onChange(of: query) { _, _ in
-            selectedIndex = 0
+            controller.selectedIndex = 0
+        }
+    }
+
+    private func setupControllerCallbacks() {
+        controller.onCommit = {
+            selectCurrent()
+        }
+        controller.onMoveDown = {
+            if controller.selectedIndex < searchResults.count - 1 {
+                controller.selectedIndex += 1
+            }
+        }
+        controller.onMoveUp = {
+            if controller.selectedIndex > 0 {
+                controller.selectedIndex -= 1
+            }
         }
     }
 
     private func selectCurrent() {
-        guard selectedIndex >= 0 && selectedIndex < searchResults.count else { return }
+        guard controller.selectedIndex >= 0 && controller.selectedIndex < searchResults.count else { return }
 
-        switch searchResults[selectedIndex] {
+        switch searchResults[controller.selectedIndex] {
         case .snippet(let snippet):
             if SnippetPlaceholders.hasPlaceholders(snippet.content) {
                 controller.placeholderPrompt = FloatingPanelController.PlaceholderPromptState(
@@ -438,7 +554,7 @@ struct FloatingSearchPanelContent: View {
         let target = controller.targetApp
         TextInserter.insert(text: text, into: target)
         query = ""
-        selectedIndex = 0
+        controller.selectedIndex = 0
     }
 }
 
