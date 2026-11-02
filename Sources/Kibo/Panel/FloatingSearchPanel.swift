@@ -61,6 +61,7 @@ final class FloatingPanelController: ObservableObject {
     @Published var isVisible = false
     @Published var placeholderPrompt: PlaceholderPromptState?
     @Published var selectedIndex: Int = 0
+    @Published var query: String = ""
 
     var onCommit: (() -> Void)?
     var onMoveDown: (() -> Void)?
@@ -111,6 +112,7 @@ final class FloatingPanelController: ObservableObject {
     func show(model: AppModel) {
         self.appModel = model
         self.selectedIndex = 0
+        self.query = ""
 
         // Record the app that was frontmost before Kibo's panel appears
         let frontApp = NSWorkspace.shared.frontmostApplication
@@ -159,7 +161,44 @@ final class FloatingPanelController: ObservableObject {
                 case 53: // Escape
                     self.hide()
                     return true
+                case 51: // Backspace / Delete
+                    if event.modifierFlags.contains(.command) {
+                        self.query = ""
+                        self.selectedIndex = 0
+                        return true
+                    } else if !self.query.isEmpty {
+                        self.query.removeLast()
+                        self.selectedIndex = 0
+                        return true
+                    }
+                    return false
                 default:
+                    // ⌘V: Paste
+                    if event.keyCode == 9 && event.modifierFlags.contains(.command) {
+                        if let pasted = NSPasteboard.general.string(forType: .string) {
+                            self.query.append(pasted)
+                            self.selectedIndex = 0
+                            return true
+                        }
+                    }
+
+                    // ⌘A: Clear query
+                    if event.keyCode == 0 && event.modifierFlags.contains(.command) {
+                        self.query = ""
+                        self.selectedIndex = 0
+                        return true
+                    }
+
+                    // Printable characters without Command modifier
+                    if !event.modifierFlags.contains(.command),
+                       let chars = event.characters, !chars.isEmpty {
+                        let scalars = chars.unicodeScalars
+                        if let first = scalars.first, first.value >= 32 && first.value != 127 {
+                            self.query.append(chars)
+                            self.selectedIndex = 0
+                            return true
+                        }
+                    }
                     return false
                 }
             }
@@ -232,17 +271,30 @@ private enum PanelItem: Identifiable {
 
 // MARK: - Floating Search Panel SwiftUI Content
 
+private struct BlinkingCursor: View {
+    @State private var visible = true
+
+    var body: some View {
+        Rectangle()
+            .fill(Color(red: 0.45, green: 0.75, blue: 1.0))
+            .frame(width: 2, height: 20)
+            .opacity(visible ? 1 : 0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.5).repeatForever()) {
+                    visible.toggle()
+                }
+            }
+    }
+}
+
 struct FloatingSearchPanelContent: View {
     @ObservedObject var controller: FloatingPanelController
     @Environment(AppModel.self) private var model
 
-    @State private var query = ""
-    @FocusState private var isSearchFocused: Bool
-
     @Query(sort: \Snippet.usageCount, order: .reverse) private var allSnippets: [Snippet]
 
     private var matchingSnippets: [Snippet] {
-        SnippetSearch.filter(items: allSnippets, query: query) {
+        SnippetSearch.filter(items: allSnippets, query: controller.query) {
             ($0.name, $0.alias, $0.category, $0.content)
         }
     }
@@ -251,7 +303,7 @@ struct FloatingSearchPanelContent: View {
     /// Emojis rank at top when query matches emoji code, name, or raw pasted emoji.
     /// When query is empty, frequently used emojis and snippets appear at top.
     private var searchResults: [PanelItem] {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let trimmed = controller.query.trimmingCharacters(in: .whitespaces)
         let usage = EmojiUsageTracker.shared.getCounts()
 
         if trimmed.isEmpty {
@@ -346,36 +398,30 @@ struct FloatingSearchPanelContent: View {
                     }
                 )
             } else {
-                // Search Bar
+                // Direct-Input Search Bar (Always Active, Zero Clicking Needed)
                 HStack(spacing: Space.sm) {
                     Image(systemName: "magnifyingglass")
                         .font(.title3)
                         .foregroundStyle(Color.white.opacity(0.8))
 
-                    TextField("Search snippets, emojis (:rose:), or paste 🌹...", text: $query)
-                        .textFieldStyle(.plain)
-                        .font(.title3)
-                        .foregroundStyle(.white)
-                        .focused($isSearchFocused)
-                        .onKeyPress(.downArrow) {
-                            if controller.selectedIndex < searchResults.count - 1 {
-                                controller.selectedIndex += 1
-                            }
-                            return .handled
+                    HStack(spacing: Space.xs) {
+                        if controller.query.isEmpty {
+                            Text("Search snippets, emojis (:rose:), or paste 🌹...")
+                                .font(.title3)
+                                .foregroundStyle(Color.white.opacity(0.4))
+                        } else {
+                            Text(controller.query)
+                                .font(.title3)
+                                .foregroundStyle(.white)
                         }
-                        .onKeyPress(.upArrow) {
-                            if controller.selectedIndex > 0 {
-                                controller.selectedIndex -= 1
-                            }
-                            return .handled
-                        }
-                        .onSubmit {
-                            selectCurrent()
-                        }
+                        BlinkingCursor()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if !query.isEmpty {
+                    if !controller.query.isEmpty {
                         Button {
-                            query = ""
+                            controller.query = ""
+                            controller.selectedIndex = 0
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(Color.white.opacity(0.6))
@@ -410,6 +456,7 @@ struct FloatingSearchPanelContent: View {
                                         isSelected: index == controller.selectedIndex
                                     )
                                     .id(index)
+                                    .focusable(false)
                                     .onTapGesture {
                                         controller.selectedIndex = index
                                         selectCurrent()
@@ -420,6 +467,7 @@ struct FloatingSearchPanelContent: View {
                                         isSelected: index == controller.selectedIndex
                                     )
                                     .id(index)
+                                    .focusable(false)
                                     .onTapGesture {
                                         controller.selectedIndex = index
                                         selectCurrent()
@@ -429,6 +477,7 @@ struct FloatingSearchPanelContent: View {
                         }
                         .padding(Space.sm)
                     }
+                    .focusable(false)
                     .frame(maxHeight: 320)
                     .background(Color(red: 0.11, green: 0.12, blue: 0.14))
                     .onChange(of: controller.selectedIndex) { _, newIndex in
@@ -481,32 +530,12 @@ struct FloatingSearchPanelContent: View {
                 .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
         )
         .onAppear {
-            isSearchFocused = true
             setupControllerCallbacks()
         }
         .onChange(of: searchResults.count) { _, newCount in
             if controller.selectedIndex >= newCount {
                 controller.selectedIndex = max(0, newCount - 1)
             }
-        }
-        .onKeyPress(.downArrow) {
-            if controller.placeholderPrompt == nil && controller.selectedIndex < searchResults.count - 1 {
-                controller.selectedIndex += 1
-            }
-            return .handled
-        }
-        .onKeyPress(.upArrow) {
-            if controller.placeholderPrompt == nil && controller.selectedIndex > 0 {
-                controller.selectedIndex -= 1
-            }
-            return .handled
-        }
-        .onKeyPress(.escape) {
-            controller.hide()
-            return .handled
-        }
-        .onChange(of: query) { _, _ in
-            controller.selectedIndex = 0
         }
     }
 
@@ -553,7 +582,7 @@ struct FloatingSearchPanelContent: View {
         controller.hide()
         let target = controller.targetApp
         TextInserter.insert(text: text, into: target)
-        query = ""
+        controller.query = ""
         controller.selectedIndex = 0
     }
 }
@@ -620,6 +649,7 @@ private struct FloatingSnippetRow: View {
                 .strokeBorder(isSelected ? Color.white.opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1)
         )
         .contentShape(Rectangle())
+        .focusable(false)
     }
 }
 
@@ -678,5 +708,6 @@ private struct FloatingEmojiRow: View {
                 .strokeBorder(isSelected ? Color.white.opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1)
         )
         .contentShape(Rectangle())
+        .focusable(false)
     }
 }
