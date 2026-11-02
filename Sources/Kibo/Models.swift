@@ -100,6 +100,11 @@ final class AppModel {
     /// Active placeholder prompt sheet state.
     var placeholderPromptSnippet: Snippet? = nil
 
+    /// Clipboard history selection and search state.
+    var clipboardSelection: PersistentIdentifier?
+    var clipboardSearchText: String = ""
+    var clipboardPinnedOnly: Bool = false
+
     /// Transient notification when a snippet is copied.
     var justCopiedUID: UUID? = nil
 
@@ -223,5 +228,73 @@ final class AppModel {
             try? container.mainContext.save()
             TextInserter.insert(text: snippet.content, into: target)
         }
+    }
+
+    // MARK: - Clipboard History Actions
+
+    func recordClipboardCopy(content: String) {
+        let entry = ClipboardEntry(content: content)
+        container.mainContext.insert(entry)
+
+        // Enforce history limit (prune oldest unpinned entries beyond 250 items)
+        let limit = 250
+        if let all = try? container.mainContext.fetch(FetchDescriptor<ClipboardEntry>(sortBy: [SortDescriptor(\.copiedAt, order: .reverse)])) {
+            let unpinned = all.filter { !$0.isPinned }
+            if unpinned.count > limit {
+                for stale in unpinned.suffix(from: limit) {
+                    container.mainContext.delete(stale)
+                }
+            }
+        }
+
+        try? container.mainContext.save()
+    }
+
+    func deleteClipboardEntry(_ entry: ClipboardEntry) {
+        if clipboardSelection == entry.id {
+            clipboardSelection = nil
+        }
+        container.mainContext.delete(entry)
+        try? container.mainContext.save()
+    }
+
+    func togglePinClipboardEntry(_ entry: ClipboardEntry) {
+        entry.isPinned.toggle()
+        try? container.mainContext.save()
+    }
+
+    func clearUnpinnedClipboard() {
+        if let all = try? container.mainContext.fetch(FetchDescriptor<ClipboardEntry>()) {
+            for entry in all where !entry.isPinned {
+                if clipboardSelection == entry.id {
+                    clipboardSelection = nil
+                }
+                container.mainContext.delete(entry)
+            }
+            try? container.mainContext.save()
+        }
+    }
+
+    func copyClipboardEntryToPasteboard(_ entry: ClipboardEntry) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(entry.content, forType: .string)
+    }
+
+    func insertClipboardEntryIntoActiveApp(_ entry: ClipboardEntry) {
+        let target = ActiveAppTracker.shared.lastExternalApp
+        TextInserter.insert(text: entry.content, into: target)
+    }
+
+    func convertClipboardEntryToSnippet(_ entry: ClipboardEntry) {
+        let titleFirstLine = entry.content.split(separator: "\n").first.map(String.init) ?? "New Snippet"
+        let truncatedTitle = titleFirstLine.count > 30 ? String(titleFirstLine.prefix(30)) + "…" : titleFirstLine
+        addSnippet(
+            name: truncatedTitle,
+            alias: "",
+            content: entry.content,
+            category: "Clippings"
+        )
+        sidebar = .snippets
     }
 }

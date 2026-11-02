@@ -33,6 +33,26 @@ enum SeedData {
             snippet.modifiedAt = snippet.createdAt
             context.insert(snippet)
         }
+
+        // Seed sample clipboard history items
+        if ((try? context.fetchCount(FetchDescriptor<ClipboardEntry>())) ?? 0) == 0 {
+            let clipboardSamples = [
+                ("git commit -m \"feat: implement universal text insertion and clipboard history\"", true),
+                ("https://developer.apple.com/documentation/appkit/nspasteboard", false),
+                ("let model = AppModel(container: Store.makeContainer())", false),
+                ("Hey team, here are the meeting notes from today's sprint planning session.", true),
+                ("curl -X GET https://api.github.com/repos/kibo/releases", false)
+            ]
+            for (offset, item) in clipboardSamples.enumerated() {
+                let entry = ClipboardEntry(
+                    content: item.0,
+                    copiedAt: Date.now.addingTimeInterval(Double(-offset) * 900),
+                    isPinned: item.1
+                )
+                context.insert(entry)
+            }
+        }
+
         try? context.save()
     }
 }

@@ -118,8 +118,7 @@ struct MenuBarMenu: View {
 
         Divider()
 
-        // Placeholder for clipboard monitoring status — Phase 5.
-        Text("Clipboard monitoring: coming soon")
+        Text("Clipboard monitoring: active")
             .foregroundStyle(.secondary)
 
         Divider()
@@ -176,7 +175,11 @@ enum Store {
 
     static func makeContainer() -> ModelContainer {
         do {
-            return try ModelContainer(for: Snippet.self, configurations: ModelConfiguration(url: url))
+            let schema = Schema([
+                Snippet.self,
+                ClipboardEntry.self,
+            ])
+            return try ModelContainer(for: schema, configurations: ModelConfiguration(url: url))
         } catch {
             fatalError("Could not open the database at \(url.path): \(error)")
         }

@@ -36,8 +36,10 @@ struct ContentView: View {
             SelfTest.runIfRequested(model: model)
             Snapshot.runIfRequested(model: model, openSettings: openSettings)
 
-            // Start global background trigger engine for typing expansion
+            // Start global background monitors and trackers
             GlobalTriggerEngine.shared.start(model: model)
+            ClipboardMonitor.shared.start(model: model)
+            ActiveAppTracker.shared.start()
         }
     }
 
@@ -62,7 +64,7 @@ struct ContentView: View {
         case .favourites:
             SnippetListView(filterFavourites: true)
         case .clipboard:
-            ClipboardPlaceholderView()
+            ClipboardListView()
         case nil:
             ContentUnavailableView("Select a Category", systemImage: "sidebar.left")
         }
@@ -74,6 +76,8 @@ struct ContentView: View {
     private var detailColumn: some View {
         if model.sidebar == .snippets || model.sidebar == .favourites {
             SnippetDetailView()
+        } else if model.sidebar == .clipboard {
+            ClipboardDetailView()
         } else {
             ContentUnavailableView("No Selection", systemImage: "doc.text")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -633,15 +637,4 @@ private struct SnippetEditorContent: View {
     }
 }
 
-// MARK: - Clipboard Placeholder
 
-struct ClipboardPlaceholderView: View {
-    var body: some View {
-        ContentUnavailableView(
-            "Clipboard History",
-            systemImage: "doc.on.clipboard",
-            description: Text("Clipboard monitoring will be available in Phase 5.")
-        )
-        .navigationTitle("Clipboard")
-    }
-}

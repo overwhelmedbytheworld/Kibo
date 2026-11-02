@@ -99,7 +99,37 @@ enum SelfTest {
             let filled = SnippetPlaceholders.substitute(template: template, with: ["name": "John"])
             check("substitutes variable with default fallback", filled == "Hi, my name is John and I study CS.")
 
-            // 8. Deletion & Cleanup
+            // 8. Clipboard History Monitoring & Operations
+            func fetchClippings() -> [ClipboardEntry] {
+                (try? context.fetch(FetchDescriptor<ClipboardEntry>())) ?? []
+            }
+            let initialClippingsCount = fetchClippings().count
+
+            model.recordClipboardCopy(content: "Testing Kibo Clipboard Monitor")
+            let clippingsAfter = fetchClippings()
+            check("recordClipboardCopy adds entry", clippingsAfter.count == initialClippingsCount + 1)
+            guard let clip = clippingsAfter.first(where: { $0.content == "Testing Kibo Clipboard Monitor" }) else {
+                check("retrieved added clipping", false)
+                finish(code: 1)
+                return
+            }
+            check("clipping charCount matches", clip.charCount == 30)
+            check("clipping initially unpinned", !clip.isPinned)
+
+            model.togglePinClipboardEntry(clip)
+            check("togglePinClipboardEntry pins item", clip.isPinned)
+
+            model.convertClipboardEntryToSnippet(clip)
+            let snippetsAfterConvert = fetchSnippets()
+            check("convertClipboardEntryToSnippet creates new snippet", snippetsAfterConvert.contains(where: { $0.content == "Testing Kibo Clipboard Monitor" }))
+
+            model.deleteClipboardEntry(clip)
+            check("deleteClipboardEntry removes entry", fetchClippings().count == initialClippingsCount)
+
+            // 9. Deletion & Cleanup
+            if let converted = snippetsAfterConvert.first(where: { $0.content == "Testing Kibo Clipboard Monitor" }) {
+                model.deleteSnippet(converted)
+            }
             model.deleteSnippet(testSnippet)
             let finalCount = fetchSnippets().count
             check("deleteSnippet restores initial count", finalCount == initialCount)
