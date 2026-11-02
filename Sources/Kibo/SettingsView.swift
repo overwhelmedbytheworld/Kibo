@@ -89,6 +89,13 @@ struct GeneralSettings: View {
                 Text("Unlimited").tag(0)
             }
         }
+
+        Section("Sound & Feedback") {
+            Toggle("Play audio click on text expansion", isOn: Binding(
+                get: { SoundFeedback.isEnabled },
+                set: { SoundFeedback.isEnabled = $0 }
+            ))
+        }
     }
 }
 

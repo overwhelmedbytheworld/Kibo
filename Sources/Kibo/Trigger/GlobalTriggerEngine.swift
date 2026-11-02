@@ -27,7 +27,7 @@ public struct CachedTrigger: Sendable, Equatable {
     }
 }
 
-/// Background keystroke monitor for automatic trigger alias expansion (e.g. typing `:email:`).
+/// Background keystroke monitor for automatic trigger alias expansion and inline suggestion HUD.
 @MainActor
 final class GlobalTriggerEngine {
     static let shared = GlobalTriggerEngine()
@@ -56,7 +56,7 @@ final class GlobalTriggerEngine {
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap, // Allows intercepting Enter/Tab/Arrows when inline suggestions are visible
             eventsOfInterest: CGEventMask(mask),
             callback: { (proxy, type, event, userInfo) -> Unmanaged<CGEvent>? in
                 guard let userInfo else { return Unmanaged.passUnretained(event) }
@@ -73,7 +73,10 @@ final class GlobalTriggerEngine {
                 guard type == .keyDown else { return Unmanaged.passUnretained(event) }
 
                 let engine = Unmanaged<GlobalTriggerEngine>.fromOpaque(userInfo).takeUnretainedValue()
-                engine.handleKeyDown(event: event)
+                let swallowed = engine.handleKeyDownIntercept(event: event)
+                if swallowed {
+                    return nil // Swallows the keystroke so host app doesn't receive it
+                }
 
                 return Unmanaged.passUnretained(event)
             },
@@ -120,31 +123,75 @@ final class GlobalTriggerEngine {
         isRunning = false
     }
 
-    /// Processes typed character off main thread callback and hops to MainActor.
-    private nonisolated func handleKeyDown(event: CGEvent) {
+    /// Processes typed character off main thread callback, intercepting navigation keys if suggestions are shown.
+    private nonisolated func handleKeyDownIntercept(event: CGEvent) -> Bool {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
-        // Handle Backspace (keycode 0x33)
+        // Check whether the inline suggestion bar is active
+        var isInlineActive = false
+        MainActor.assumeIsolated {
+            isInlineActive = InlineSuggestionController.shared.isVisible
+        }
+
+        if isInlineActive {
+            // Return / Enter (0x24) or Tab (0x30)
+            if keyCode == 0x24 || keyCode == 0x30 {
+                Task { @MainActor in
+                    InlineSuggestionController.shared.commitCurrent(targetApp: ActiveAppTracker.shared.lastExternalApp)
+                    self.buffer = ""
+                }
+                return true // Swallows Return/Tab so message is not sent in WhatsApp
+            }
+
+            // Right Arrow (0x7C)
+            if keyCode == 0x7C {
+                Task { @MainActor in
+                    InlineSuggestionController.shared.moveNext()
+                }
+                return true
+            }
+
+            // Left Arrow (0x7B)
+            if keyCode == 0x7B {
+                Task { @MainActor in
+                    InlineSuggestionController.shared.movePrev()
+                }
+                return true
+            }
+
+            // Escape (0x35)
+            if keyCode == 0x35 {
+                Task { @MainActor in
+                    InlineSuggestionController.shared.hide()
+                }
+                return true
+            }
+        }
+
+        // Handle Backspace (0x33)
         if keyCode == 0x33 {
             Task { @MainActor in
                 if !self.buffer.isEmpty {
                     self.buffer.removeLast()
+                    self.evaluateInlineSuggestions()
                 }
             }
-            return
+            return false
         }
 
         // Get typed Unicode character
         var length = 0
         var chars = [UniChar](repeating: 0, count: 4)
         event.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: &chars)
-        guard length > 0 else { return }
+        guard length > 0 else { return false }
 
         let str = String(utf16CodeUnits: chars, count: length)
 
         Task { @MainActor in
             self.appendCharacter(str)
         }
+
+        return false
     }
 
     private func appendCharacter(_ char: String) {
@@ -159,12 +206,71 @@ final class GlobalTriggerEngine {
             buffer = String(buffer.suffix(40))
         }
 
-        // Check if buffer ends with any registered alias
-        checkForTriggerMatch()
+        // If buffer ends with colon :, check for exact trigger match
+        if buffer.hasSuffix(":") {
+            checkForTriggerMatch()
+        } else {
+            // Otherwise, evaluate real-time inline suggestions (WhatsApp style)
+            evaluateInlineSuggestions()
+        }
+    }
+
+    /// Evaluates whether the current typing buffer matches any partial shortcode (e.g. ":fi" or ":smil").
+    private func evaluateInlineSuggestions() {
+        guard let lastColonIndex = buffer.lastIndex(of: ":") else {
+            InlineSuggestionController.shared.hide()
+            return
+        }
+
+        // Ensure the colon is either at start of buffer or preceded by whitespace / newline
+        if lastColonIndex > buffer.startIndex {
+            let prevIndex = buffer.index(before: lastColonIndex)
+            if !buffer[prevIndex].isWhitespace && buffer[prevIndex] != "\n" {
+                InlineSuggestionController.shared.hide()
+                return
+            }
+        }
+
+        let triggerSlice = buffer[lastColonIndex...]
+        let triggerString = String(triggerSlice) // e.g. ":fi" or ":smil"
+
+        // Require at least 1 character after colon and no spaces
+        guard triggerString.count >= 2 && !triggerString.contains(" ") else {
+            InlineSuggestionController.shared.hide()
+            return
+        }
+
+        let query = String(triggerString.dropFirst()) // e.g. "fi" or "smil"
+        let usage = EmojiUsageTracker.shared.getCounts()
+
+        let matchingEmojis = EmojiCatalog.filter(query: query, usageCounts: usage).prefix(8)
+        let matchingSnippets = cachedTriggers.filter {
+            $0.alias.lowercased().contains(query.lowercased())
+        }.prefix(3)
+
+        if matchingEmojis.isEmpty && matchingSnippets.isEmpty {
+            InlineSuggestionController.shared.hide()
+            return
+        }
+
+        var items: [InlineSuggestionItem] = []
+        for emoji in matchingEmojis {
+            items.append(.emoji(emoji))
+        }
+        for snippet in matchingSnippets {
+            items.append(.snippet(alias: snippet.alias, content: snippet.content, name: snippet.name))
+        }
+
+        InlineSuggestionController.shared.show(
+            suggestions: items,
+            trigger: triggerString,
+            targetApp: ActiveAppTracker.shared.lastExternalApp
+        )
     }
 
     private func checkForTriggerMatch() {
-        guard buffer.hasSuffix(":") else { return }
+        // Hide inline suggestions on complete trigger entry
+        InlineSuggestionController.shared.hide()
 
         // 1. Fast in-memory check against user snippet triggers first
         for trigger in cachedTriggers {
@@ -180,6 +286,8 @@ final class GlobalTriggerEngine {
         if let emojiMatch = EmojiCatalog.findMatch(in: buffer) {
             buffer = ""
             TextInserter.insert(text: emojiMatch.emoji, backspaces: emojiMatch.alias.count)
+            EmojiUsageTracker.shared.recordUsage(emoji: emojiMatch.emoji)
+            SoundFeedback.playExpansionClick()
             return
         }
     }
@@ -196,6 +304,7 @@ final class GlobalTriggerEngine {
             // Direct expansion: backspace the typed alias and paste the snippet content
             TextInserter.insert(text: trigger.content, backspaces: trigger.alias.count)
             model?.recordSnippetUsage(id: trigger.id)
+            SoundFeedback.playExpansionClick()
         }
     }
 }

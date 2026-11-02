@@ -74,6 +74,27 @@ struct EmojiCatalogTests {
         #expect(reverse?.unicodeHex.contains("U+1FAE8") == true)
     }
 
+    @Test("Search query 'thumbs up', 'thumbs', 'thumb' finds thumbs up emoji")
+    func searchThumbsUpVariations() {
+        let resultsFull = EmojiCatalog.filter(query: "thumbs up")
+        #expect(resultsFull.first?.emoji == "👍")
+
+        let resultsPlural = EmojiCatalog.filter(query: "thumbs")
+        #expect(resultsPlural.first?.emoji == "👍")
+
+        let resultsSingular = EmojiCatalog.filter(query: "thumb")
+        #expect(resultsSingular.first?.emoji == "👍")
+    }
+
+    @Test("Common queries find correct emojis")
+    func commonQueries() {
+        #expect(EmojiCatalog.filter(query: "shrug").first?.emoji == "🤷")
+        #expect(EmojiCatalog.filter(query: "pray").first?.emoji == "🙏")
+        #expect(EmojiCatalog.filter(query: "coffee").first?.emoji == "☕")
+        #expect(EmojiCatalog.filter(query: "pizza").first?.emoji == "🍕")
+        #expect(EmojiCatalog.all.count >= 1700)
+    }
+
     @Test("Category filtering narrows emojis")
     func categoryFiltering() {
         let foodItems = EmojiCatalog.filter(query: "", category: "Food")

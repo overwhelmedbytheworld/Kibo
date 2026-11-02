@@ -196,13 +196,21 @@ struct FloatingSearchPanelContent: View {
 
     /// Unified search results with intelligent ranking:
     /// Emojis rank at top when query matches emoji code, name, or raw pasted emoji.
+    /// When query is empty, frequently used emojis and snippets appear at top.
     private var searchResults: [PanelItem] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let usage = EmojiUsageTracker.shared.getCounts()
+
         if trimmed.isEmpty {
-            return allSnippets.prefix(12).map { PanelItem.snippet($0) }
+            let topEmojis = EmojiUsageTracker.shared.topEmojis(limit: 6).map { PanelItem.emoji($0) }
+            let topSnippets = allSnippets.sorted {
+                if $0.usageCount != $1.usageCount { return $0.usageCount > $1.usageCount }
+                return ($0.lastUsedAt ?? .distantPast) > ($1.lastUsedAt ?? .distantPast)
+            }.prefix(6).map { PanelItem.snippet($0) }
+            return topEmojis + Array(topSnippets)
         }
 
-        let emojiMatches = EmojiCatalog.filter(query: trimmed)
+        let emojiMatches = EmojiCatalog.filter(query: trimmed, usageCounts: usage)
         let snippetMatches = matchingSnippets
 
         let cleanQuery = trimmed.lowercased().replacingOccurrences(of: ":", with: "")
@@ -211,27 +219,29 @@ struct FloatingSearchPanelContent: View {
         let isExplicitEmoji = trimmed.hasPrefix(":") ||
             EmojiCatalog.reverseEngineer(input: trimmed) != nil ||
             emojiMatches.first?.aliases.contains(where: {
-                $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame
+                let aliasClean = $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).lowercased()
+                return aliasClean == cleanQuery || aliasClean.replacingOccurrences(of: "_", with: "") == cleanQuery.replacingOccurrences(of: " ", with: "")
             }) == true
 
         if isExplicitEmoji {
             // Emojis first, then snippets
             let emojis = emojiMatches.prefix(8).map { PanelItem.emoji($0) }
-            let snippets = snippetMatches.prefix(6).map { PanelItem.snippet($0) }
+            let snippets = snippetMatches.prefix(4).map { PanelItem.snippet($0) }
             return Array(emojis) + Array(snippets)
         } else {
-            // Check if top emoji is an exact alias/name match (e.g. typing "rose" matches :rose:)
-            if let exact = emojiMatches.first,
-               exact.aliases.contains(where: { $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame }) ||
-               exact.name.localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame {
-                let exactEmoji = PanelItem.emoji(exact)
-                let snippets = snippetMatches.prefix(8).map { PanelItem.snippet($0) }
+            // Check if top emoji has a strong match
+            if let topEmoji = emojiMatches.first,
+               topEmoji.aliases.contains(where: { $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame }) ||
+               topEmoji.name.localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame ||
+               topEmoji.keywords.contains(cleanQuery) {
+                let exactEmoji = PanelItem.emoji(topEmoji)
                 let otherEmojis = emojiMatches.dropFirst().prefix(4).map { PanelItem.emoji($0) }
+                let snippets = snippetMatches.prefix(6).map { PanelItem.snippet($0) }
                 return [exactEmoji] + Array(snippets) + Array(otherEmojis)
             } else {
                 // Snippets first, then emojis
-                let snippets = snippetMatches.prefix(8).map { PanelItem.snippet($0) }
-                let emojis = emojiMatches.prefix(4).map { PanelItem.emoji($0) }
+                let snippets = snippetMatches.prefix(6).map { PanelItem.snippet($0) }
+                let emojis = emojiMatches.prefix(6).map { PanelItem.emoji($0) }
                 return Array(snippets) + Array(emojis)
             }
         }
@@ -413,9 +423,13 @@ struct FloatingSearchPanelContent: View {
                 )
             } else {
                 insertText(snippet.content)
+                model.recordSnippetUsage(id: snippet.id)
+                SoundFeedback.playExpansionClick()
             }
         case .emoji(let emojiItem):
             insertText(emojiItem.emoji)
+            EmojiUsageTracker.shared.recordUsage(emoji: emojiItem.emoji)
+            SoundFeedback.playExpansionClick()
         }
     }
 
