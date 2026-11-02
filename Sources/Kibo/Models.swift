@@ -42,7 +42,7 @@ final class Snippet {
 
 /// The sidebar pages. Snapshot mode walks through every case.
 enum SidebarPage: String, CaseIterable, Identifiable {
-    case clipboard, snippets, favourites
+    case clipboard, snippets, favourites, stats
 
     var id: String { rawValue }
 
@@ -51,6 +51,7 @@ enum SidebarPage: String, CaseIterable, Identifiable {
         case .clipboard: "Clipboard"
         case .snippets: "Snippets"
         case .favourites: "Favourites"
+        case .stats: "Insights"
         }
     }
 
@@ -59,6 +60,7 @@ enum SidebarPage: String, CaseIterable, Identifiable {
         case .clipboard: "doc.on.clipboard"
         case .snippets: "text.quote"
         case .favourites: "star"
+        case .stats: "chart.bar.xaxis"
         }
     }
 }
@@ -250,6 +252,22 @@ final class AppModel {
         try? container.mainContext.save()
     }
 
+    func recordClipboardImage(data: Data, text: String = "") {
+        let entry = ClipboardEntry(content: text, imageData: data)
+        container.mainContext.insert(entry)
+
+        let limit = 250
+        if let all = try? container.mainContext.fetch(FetchDescriptor<ClipboardEntry>(sortBy: [SortDescriptor(\.copiedAt, order: .reverse)])) {
+            let unpinned = all.filter { !$0.isPinned }
+            if unpinned.count > limit {
+                for stale in unpinned.suffix(from: limit) {
+                    container.mainContext.delete(stale)
+                }
+            }
+        }
+        try? container.mainContext.save()
+    }
+
     func deleteClipboardEntry(_ entry: ClipboardEntry) {
         if clipboardSelection == entry.id {
             clipboardSelection = nil
@@ -278,12 +296,22 @@ final class AppModel {
     func copyClipboardEntryToPasteboard(_ entry: ClipboardEntry) {
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.setString(entry.content, forType: .string)
+        if let imgData = entry.imageData {
+            pb.setData(imgData, forType: .png)
+            pb.setData(imgData, forType: .tiff)
+        }
+        if !entry.content.isEmpty {
+            pb.setString(entry.content, forType: .string)
+        }
     }
 
     func insertClipboardEntryIntoActiveApp(_ entry: ClipboardEntry) {
         let target = ActiveAppTracker.shared.lastExternalApp
-        TextInserter.insert(text: entry.content, into: target)
+        if let imgData = entry.imageData {
+            TextInserter.insertImage(data: imgData, into: target)
+        } else {
+            TextInserter.insert(text: entry.content, into: target)
+        }
     }
 
     func convertClipboardEntryToSnippet(_ entry: ClipboardEntry) {

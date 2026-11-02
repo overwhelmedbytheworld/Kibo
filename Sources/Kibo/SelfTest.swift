@@ -114,7 +114,17 @@ enum SelfTest {
                 return
             }
             check("clipping charCount matches", clip.charCount == 30)
+            check("clipping title generated", clip.title == "Testing Kibo Clipboard Monitor")
             check("clipping initially unpinned", !clip.isPinned)
+
+            // Test image clipping recording
+            let fakeImageData = Data([0x89, 0x50, 0x4E, 0x47]) // PNG header bytes
+            model.recordClipboardImage(data: fakeImageData, text: "Sample Copied Image")
+            let withImage = fetchClippings()
+            check("recordClipboardImage stores data", withImage.contains(where: { $0.imageData == fakeImageData }))
+            if let imgEntry = withImage.first(where: { $0.imageData == fakeImageData }) {
+                model.deleteClipboardEntry(imgEntry)
+            }
 
             model.togglePinClipboardEntry(clip)
             check("togglePinClipboardEntry pins item", clip.isPinned)
@@ -126,7 +136,10 @@ enum SelfTest {
             model.deleteClipboardEntry(clip)
             check("deleteClipboardEntry removes entry", fetchClippings().count == initialClippingsCount)
 
-            // 9. Deletion & Cleanup
+            // 9. Insights / Statistics
+            check("stats page defined in sidebar", SidebarPage.allCases.contains(.stats))
+
+            // 10. Deletion & Cleanup
             if let converted = snippetsAfterConvert.first(where: { $0.content == "Testing Kibo Clipboard Monitor" }) {
                 model.deleteSnippet(converted)
             }

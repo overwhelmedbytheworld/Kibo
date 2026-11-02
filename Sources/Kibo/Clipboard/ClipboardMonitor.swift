@@ -10,6 +10,7 @@ final class ClipboardMonitor {
     private var timer: Timer?
     private var lastChangeCount: Int = 0
     private var lastCapturedContent: String?
+    private var lastCapturedImageDataLength: Int = 0
     private weak var model: AppModel?
 
     private(set) var isMonitoring = false
@@ -50,6 +51,19 @@ final class ClipboardMonitor {
         // Do not record internal pasteboard operations from TextInserter
         guard !TextInserter.isInternalPasteInFlight else { return }
 
+        // 1. Check for Image data (PNG / TIFF)
+        if let imgData = pb.data(forType: .png) ?? pb.data(forType: .tiff) {
+            guard imgData.count != lastCapturedImageDataLength else { return }
+            lastCapturedImageDataLength = imgData.count
+
+            let textContent = pb.string(forType: .string) ?? ""
+            lastCapturedContent = textContent
+
+            model?.recordClipboardImage(data: imgData, text: textContent)
+            return
+        }
+
+        // 2. Check for Text string
         guard let raw = pb.string(forType: .string) else { return }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -57,6 +71,7 @@ final class ClipboardMonitor {
         // Ignore consecutive duplicates
         guard raw != lastCapturedContent else { return }
         lastCapturedContent = raw
+        lastCapturedImageDataLength = 0
 
         model?.recordClipboardCopy(content: raw)
     }

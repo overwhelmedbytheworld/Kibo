@@ -63,6 +63,11 @@ final class FloatingPanelController: ObservableObject {
         }
     }
 
+    /// Pre-configures the model reference on startup so placeholder prompts can summon immediately.
+    func configure(model: AppModel) {
+        self.appModel = model
+    }
+
     func show(model: AppModel) {
         self.appModel = model
 

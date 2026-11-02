@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-/// Universal text insertion into any macOS application using synthetic ⌘V.
+/// Universal text and image insertion into any macOS application using synthetic ⌘V.
 @MainActor
 public enum TextInserter {
     /// Flag indicating an internal copy operation is in-flight so ClipboardMonitor ignores it.
@@ -43,12 +43,21 @@ public enum TextInserter {
             destinationApp = app
         } else if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != myPID {
             destinationApp = front
+        } else if let last = ActiveAppTracker.shared.lastExternalApp, last.processIdentifier != myPID {
+            destinationApp = last
         } else {
-            destinationApp = ActiveAppTracker.shared.lastExternalApp
+            destinationApp = NSWorkspace.shared.runningApplications.first(where: {
+                $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != myPID
+            })
         }
 
         // If Kibo is currently frontmost, hide Kibo so destination app regains focus
         if NSApp.isActive || NSWorkspace.shared.frontmostApplication?.processIdentifier == myPID {
+            NSApp.windows.forEach { window in
+                if window.isKeyWindow {
+                    window.orderOut(nil)
+                }
+            }
             NSApp.hide(nil)
         }
 
@@ -63,9 +72,9 @@ public enum TextInserter {
         Task { @MainActor in
             // Wait for target app window to gain full keyboard focus
             if destinationApp != nil {
-                try? await Task.sleep(for: .milliseconds(160))
+                try? await Task.sleep(for: .milliseconds(220))
             } else {
-                try? await Task.sleep(for: .milliseconds(40))
+                try? await Task.sleep(for: .milliseconds(50))
             }
 
             let source = CGEventSource(stateID: .combinedSessionState)
@@ -81,7 +90,7 @@ public enum TextInserter {
                     try? await Task.sleep(for: .milliseconds(4))
                 }
                 // Allow the target text input context to process deletions
-                try? await Task.sleep(for: .milliseconds(50))
+                try? await Task.sleep(for: .milliseconds(60))
             }
 
             // 4. Clipboard-assisted paste with explicit Command key hold & release
@@ -126,6 +135,75 @@ public enum TextInserter {
                 }
             }
 
+            isInternalPasteInFlight = false
+        }
+    }
+
+    /// Inserts raw image data (PNG/TIFF) into the active application via pasteboard synthesis.
+    public static func insertImage(
+        data: Data,
+        into targetApp: NSRunningApplication? = nil
+    ) {
+        guard !data.isEmpty else { return }
+
+        let myPID = ProcessInfo.processInfo.processIdentifier
+
+        let destinationApp: NSRunningApplication?
+        if let app = targetApp, app.processIdentifier != myPID {
+            destinationApp = app
+        } else if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != myPID {
+            destinationApp = front
+        } else if let last = ActiveAppTracker.shared.lastExternalApp, last.processIdentifier != myPID {
+            destinationApp = last
+        } else {
+            destinationApp = NSWorkspace.shared.runningApplications.first(where: {
+                $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != myPID
+            })
+        }
+
+        if NSApp.isActive || NSWorkspace.shared.frontmostApplication?.processIdentifier == myPID {
+            NSApp.windows.forEach { if $0.isKeyWindow { $0.orderOut(nil) } }
+            NSApp.hide(nil)
+        }
+
+        if let dest = destinationApp {
+            if #available(macOS 14.0, *) {
+                NSApp.yieldActivation(to: dest)
+            }
+            dest.activate()
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(220))
+
+            let pb = NSPasteboard.general
+            isInternalPasteInFlight = true
+            pb.clearContents()
+            pb.setData(data, forType: .png)
+            pb.setData(data, forType: .tiff)
+
+            let source = CGEventSource(stateID: .combinedSessionState)
+            let cmdKeyCode: CGKeyCode = 0x37
+            let vKeyCode: CGKeyCode = 0x09
+
+            let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: true)
+            cmdDown?.flags = .maskCommand
+            cmdDown?.post(tap: .cghidEventTap)
+
+            let vDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true)
+            vDown?.flags = .maskCommand
+            vDown?.post(tap: .cghidEventTap)
+
+            try? await Task.sleep(for: .milliseconds(25))
+
+            let vUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
+            vUp?.flags = .maskCommand
+            vUp?.post(tap: .cghidEventTap)
+
+            let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: false)
+            cmdUp?.post(tap: .cghidEventTap)
+
+            try? await Task.sleep(for: .milliseconds(1000))
             isInternalPasteInFlight = false
         }
     }

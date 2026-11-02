@@ -31,23 +31,27 @@ enum SeedData {
             )
             snippet.createdAt = Date.now.addingTimeInterval(Double(-index) * 3_600)
             snippet.modifiedAt = snippet.createdAt
+            snippet.usageCount = (6 - index) * 7
+            snippet.lastUsedAt = Date.now.addingTimeInterval(Double(-index) * 1_800)
             context.insert(snippet)
         }
 
-        // Seed sample clipboard history items
+        // Seed sample clipboard history items styled like Paste card grid
         if ((try? context.fetchCount(FetchDescriptor<ClipboardEntry>())) ?? 0) == 0 {
-            let clipboardSamples = [
-                ("git commit -m \"feat: implement universal text insertion and clipboard history\"", true),
-                ("https://developer.apple.com/documentation/appkit/nspasteboard", false),
-                ("let model = AppModel(container: Store.makeContainer())", false),
-                ("Hey team, here are the meeting notes from today's sprint planning session.", true),
-                ("curl -X GET https://api.github.com/repos/kibo/releases", false)
+            let clipboardSamples: [(title: String, content: String, isPinned: Bool)] = [
+                ("Niagara Falls Location", "Niagara Falls is located on the Niagara River, spanning the border between Ontario and New York.", true),
+                ("Party Membership by Country", "When looking at the percentage of the population, some datasets indicate higher political engagement.", false),
+                ("2016 Summer Olympics", "The 2016 Summer Olympics were held in Rio de Janeiro, Brazil, featuring 207 competing teams.", true),
+                ("Electro-chemistry Rule", "Electrochemical cell potential is determined by standard reduction potentials at standard state.", false),
+                ("Silicon Melting Point", "Silicon has a melting point of 1,414 °C and a boiling point of 3,265 °C.", false),
+                ("Graphite Composition", "Graphite consists of stacked graphene layers held together by weak van der Waals forces.", false)
             ]
             for (offset, item) in clipboardSamples.enumerated() {
                 let entry = ClipboardEntry(
-                    content: item.0,
+                    content: item.content,
+                    title: item.title,
                     copiedAt: Date.now.addingTimeInterval(Double(-offset) * 900),
-                    isPinned: item.1
+                    isPinned: item.isPinned
                 )
                 context.insert(entry)
             }

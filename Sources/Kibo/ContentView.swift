@@ -37,6 +37,7 @@ struct ContentView: View {
             Snapshot.runIfRequested(model: model, openSettings: openSettings)
 
             // Start global background monitors and trackers
+            FloatingPanelController.shared.configure(model: model)
             GlobalTriggerEngine.shared.start(model: model)
             ClipboardMonitor.shared.start(model: model)
             ActiveAppTracker.shared.start()
@@ -65,6 +66,8 @@ struct ContentView: View {
             SnippetListView(filterFavourites: true)
         case .clipboard:
             ClipboardListView()
+        case .stats:
+            StatsView()
         case nil:
             ContentUnavailableView("Select a Category", systemImage: "sidebar.left")
         }
@@ -78,6 +81,8 @@ struct ContentView: View {
             SnippetDetailView()
         } else if model.sidebar == .clipboard {
             ClipboardDetailView()
+        } else if model.sidebar == .stats {
+            ContentUnavailableView("Insights Dashboard", systemImage: "chart.bar.xaxis", description: Text("Telemetry updates automatically in real-time as you use Kibo."))
         } else {
             ContentUnavailableView("No Selection", systemImage: "doc.text")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -66,6 +66,9 @@ struct PlaceholderPromptView: View {
                                 )
                             )
                             .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                onInsert(substitutedResult)
+                            }
                         }
                     }
                 }
