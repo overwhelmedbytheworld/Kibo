@@ -136,12 +136,16 @@ enum SelfTest {
             model.deleteClipboardEntry(clip)
             check("deleteClipboardEntry removes entry", fetchClippings().count == initialClippingsCount)
 
-            // 9. Emoji Catalog & Multi-Alias Matching
+            // 9. Emoji Catalog, Multi-Alias Matching & Reverse-Engineering
             check("emoji lookup :fire: -> 🔥", EmojiCatalog.findMatch(in: ":fire:")?.emoji == "🔥")
             check("emoji lookup :thumbs_up: -> 👍", EmojiCatalog.findMatch(in: ":thumbs_up:")?.emoji == "👍")
             check("emoji lookup :thumbsup: -> 👍", EmojiCatalog.findMatch(in: ":thumbsup:")?.emoji == "👍")
             check("modern apple emoji :salute: -> 🫡", EmojiCatalog.findMatch(in: ":salute:")?.emoji == "🫡")
             check("modern apple emoji :heart_on_fire: -> ❤️‍🔥", EmojiCatalog.findMatch(in: ":heart_on_fire:")?.emoji == "❤️‍🔥")
+            check("emoji search 'rose' ranks 🌹 first", EmojiCatalog.filter(query: "rose").first?.emoji == "🌹")
+            check("emoji reverse-engineer pasted '🌹' succeeds", EmojiCatalog.reverseEngineer(input: "🌹")?.emoji == "🌹")
+            check("emoji reverse-engineer arbitrary emoji '🫨' succeeds", EmojiCatalog.reverseEngineer(input: "🫨") != nil)
+            check("emojis tab defined in sidebar", SidebarPage.allCases.contains(.emojis))
 
             // 10. Insights / Statistics
             check("stats page defined in sidebar", SidebarPage.allCases.contains(.stats))

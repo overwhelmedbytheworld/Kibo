@@ -47,4 +47,38 @@ struct EmojiCatalogTests {
         #expect(results.contains(where: { $0.emoji == "❤️" }))
         #expect(results.contains(where: { $0.emoji == "😍" }))
     }
+
+    @Test("Search query 'rose' returns 🌹 as top result")
+    func searchRosePrioritizesRose() {
+        let results = EmojiCatalog.filter(query: "rose")
+        #expect(!results.isEmpty)
+        #expect(results.first?.emoji == "🌹")
+        #expect(results.first?.primaryAlias == ":rose:")
+    }
+
+    @Test("Pasting raw emoji '🌹' reverse-engineers code and Unicode hex")
+    func reverseEngineerPastedEmoji() {
+        let reverse = EmojiCatalog.reverseEngineer(input: "🌹")
+        #expect(reverse != nil)
+        #expect(reverse?.emoji == "🌹")
+        #expect(reverse?.name == "Rose")
+        #expect(reverse?.primaryAlias == ":rose:")
+        #expect(reverse?.unicodeHex == "U+1F339")
+    }
+
+    @Test("Pasting arbitrary Unicode emoji creates valid metadata")
+    func reverseEngineerArbitraryEmoji() {
+        let reverse = EmojiCatalog.reverseEngineer(input: "🫨")
+        #expect(reverse != nil)
+        #expect(reverse?.emoji == "🫨")
+        #expect(reverse?.unicodeHex.contains("U+1FAE8") == true)
+    }
+
+    @Test("Category filtering narrows emojis")
+    func categoryFiltering() {
+        let foodItems = EmojiCatalog.filter(query: "", category: "Food")
+        #expect(!foodItems.isEmpty)
+        #expect(foodItems.allSatisfy { $0.category == "Food" })
+        #expect(foodItems.contains(where: { $0.emoji == "🍕" }))
+    }
 }

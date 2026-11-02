@@ -42,7 +42,7 @@ final class Snippet {
 
 /// The sidebar pages. Snapshot mode walks through every case.
 enum SidebarPage: String, CaseIterable, Identifiable {
-    case clipboard, snippets, favourites, stats
+    case clipboard, snippets, favourites, emojis, stats
 
     var id: String { rawValue }
 
@@ -51,6 +51,7 @@ enum SidebarPage: String, CaseIterable, Identifiable {
         case .clipboard: "Clipboard"
         case .snippets: "Snippets"
         case .favourites: "Favourites"
+        case .emojis: "Emojis"
         case .stats: "Insights"
         }
     }
@@ -60,6 +61,7 @@ enum SidebarPage: String, CaseIterable, Identifiable {
         case .clipboard: "doc.on.clipboard"
         case .snippets: "text.quote"
         case .favourites: "star"
+        case .emojis: "face.smiling"
         case .stats: "chart.bar.xaxis"
         }
     }
@@ -106,6 +108,11 @@ final class AppModel {
     var clipboardSelection: PersistentIdentifier?
     var clipboardSearchText: String = ""
     var clipboardPinnedOnly: Bool = false
+
+    /// Emoji library selection, search, and category filter state.
+    var selectedEmoji: EmojiItem? = nil
+    var emojiSearchText: String = ""
+    var selectedEmojiCategory: String = "All"
 
     /// Transient notification when a snippet is copied.
     var justCopiedUID: UUID? = nil

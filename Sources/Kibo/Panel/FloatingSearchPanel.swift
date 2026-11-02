@@ -109,7 +109,7 @@ final class FloatingPanelController: ObservableObject {
         }
 
         if panel == nil {
-            let p = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 420))
+            let p = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 580, height: 440))
 
             let rootView = FloatingSearchPanelContent(controller: self)
                 .environment(model)
@@ -162,6 +162,20 @@ final class FloatingPanelController: ObservableObject {
     }
 }
 
+// MARK: - Search Result Model
+
+private enum PanelItem: Identifiable {
+    case snippet(Snippet)
+    case emoji(EmojiItem)
+
+    var id: String {
+        switch self {
+        case .snippet(let s): return "s_\(s.id)"
+        case .emoji(let e): return "e_\(e.id)"
+        }
+    }
+}
+
 // MARK: - Floating Search Panel SwiftUI Content
 
 struct FloatingSearchPanelContent: View {
@@ -170,6 +184,7 @@ struct FloatingSearchPanelContent: View {
 
     @State private var query = ""
     @State private var selectedIndex = 0
+    @FocusState private var isSearchFocused: Bool
 
     @Query(sort: \Snippet.usageCount, order: .reverse) private var allSnippets: [Snippet]
 
@@ -179,13 +194,47 @@ struct FloatingSearchPanelContent: View {
         }
     }
 
-    private var matchingEmojis: [EmojiItem] {
-        guard !query.isEmpty else { return [] }
-        return Array(EmojiCatalog.filter(query: query).prefix(8))
-    }
+    /// Unified search results with intelligent ranking:
+    /// Emojis rank at top when query matches emoji code, name, or raw pasted emoji.
+    private var searchResults: [PanelItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            return allSnippets.prefix(12).map { PanelItem.snippet($0) }
+        }
 
-    private var totalItemCount: Int {
-        matchingSnippets.count + matchingEmojis.count
+        let emojiMatches = EmojiCatalog.filter(query: trimmed)
+        let snippetMatches = matchingSnippets
+
+        let cleanQuery = trimmed.lowercased().replacingOccurrences(of: ":", with: "")
+
+        // Check if query is explicitly an emoji trigger (starts with :, raw emoji, or exact alias)
+        let isExplicitEmoji = trimmed.hasPrefix(":") ||
+            EmojiCatalog.reverseEngineer(input: trimmed) != nil ||
+            emojiMatches.first?.aliases.contains(where: {
+                $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame
+            }) == true
+
+        if isExplicitEmoji {
+            // Emojis first, then snippets
+            let emojis = emojiMatches.prefix(8).map { PanelItem.emoji($0) }
+            let snippets = snippetMatches.prefix(6).map { PanelItem.snippet($0) }
+            return Array(emojis) + Array(snippets)
+        } else {
+            // Check if top emoji is an exact alias/name match (e.g. typing "rose" matches :rose:)
+            if let exact = emojiMatches.first,
+               exact.aliases.contains(where: { $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame }) ||
+               exact.name.localizedCaseInsensitiveCompare(cleanQuery) == .orderedSame {
+                let exactEmoji = PanelItem.emoji(exact)
+                let snippets = snippetMatches.prefix(8).map { PanelItem.snippet($0) }
+                let otherEmojis = emojiMatches.dropFirst().prefix(4).map { PanelItem.emoji($0) }
+                return [exactEmoji] + Array(snippets) + Array(otherEmojis)
+            } else {
+                // Snippets first, then emojis
+                let snippets = snippetMatches.prefix(8).map { PanelItem.snippet($0) }
+                let emojis = emojiMatches.prefix(4).map { PanelItem.emoji($0) }
+                return Array(snippets) + Array(emojis)
+            }
+        }
     }
 
     var body: some View {
@@ -209,11 +258,13 @@ struct FloatingSearchPanelContent: View {
                 HStack(spacing: Space.sm) {
                     Image(systemName: "magnifyingglass")
                         .font(.title3)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.white.opacity(0.8))
 
-                    TextField("Search snippets or type :emoji:...", text: $query)
+                    TextField("Search snippets, emojis (:rose:), or paste 🌹...", text: $query)
                         .textFieldStyle(.plain)
                         .font(.title3)
+                        .foregroundStyle(.white)
+                        .focused($isSearchFocused)
                         .onSubmit {
                             selectCurrent()
                         }
@@ -223,89 +274,79 @@ struct FloatingSearchPanelContent: View {
                             query = ""
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.white.opacity(0.6))
                         }
                         .buttonStyle(.plain)
                     }
 
                     Text("⌘⇧K")
                         .font(.caption.monospaced())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color.white.opacity(0.7))
                         .padding(.horizontal, Space.xs)
                         .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
                 }
                 .padding(.horizontal, Space.lg)
                 .frame(height: 56)
-                .background(.ultraThinMaterial)
-                .overlay(Divider(), alignment: .bottom)
+                .background(Color(red: 0.14, green: 0.15, blue: 0.18))
+                .overlay(
+                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1),
+                    alignment: .bottom
+                )
 
                 // Results List (Snippets + Matching Emojis)
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 2) {
-                            // Snippets Section
-                            ForEach(Array(matchingSnippets.enumerated()), id: \.element.id) { index, snippet in
-                                FloatingSnippetRow(
-                                    snippet: snippet,
-                                    isSelected: index == selectedIndex
-                                )
-                                .id(index)
-                                .onTapGesture {
-                                    selectedIndex = index
-                                    selectCurrent()
-                                }
-                            }
-
-                            // Matching Emojis Section
-                            if !matchingEmojis.isEmpty {
-                                HStack {
-                                    Text("EMOJIS")
-                                        .font(.caption2.weight(.bold))
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                }
-                                .padding(.horizontal, Space.md)
-                                .padding(.top, Space.sm)
-
-                                ForEach(Array(matchingEmojis.enumerated()), id: \.element.emoji) { index, item in
-                                    let globalIndex = matchingSnippets.count + index
-                                    FloatingEmojiRow(
-                                        item: item,
-                                        isSelected: globalIndex == selectedIndex
+                        LazyVStack(spacing: 4) {
+                            ForEach(Array(searchResults.enumerated()), id: \.element.id) { index, item in
+                                switch item {
+                                case .snippet(let snippet):
+                                    FloatingSnippetRow(
+                                        snippet: snippet,
+                                        isSelected: index == selectedIndex
                                     )
-                                    .id(globalIndex)
+                                    .id(index)
                                     .onTapGesture {
-                                        selectedIndex = globalIndex
+                                        selectedIndex = index
+                                        selectCurrent()
+                                    }
+                                case .emoji(let emojiItem):
+                                    FloatingEmojiRow(
+                                        item: emojiItem,
+                                        isSelected: index == selectedIndex
+                                    )
+                                    .id(index)
+                                    .onTapGesture {
+                                        selectedIndex = index
                                         selectCurrent()
                                     }
                                 }
                             }
                         }
-                        .padding(Space.xs)
+                        .padding(Space.sm)
                     }
-                    .frame(maxHeight: 280)
-                    .background(.ultraThinMaterial)
+                    .frame(maxHeight: 320)
+                    .background(Color(red: 0.11, green: 0.12, blue: 0.14))
                     .onChange(of: selectedIndex) { _, newIndex in
                         proxy.scrollTo(newIndex, anchor: .center)
                     }
                 }
                 .overlay {
-                    if matchingSnippets.isEmpty && matchingEmojis.isEmpty {
+                    if searchResults.isEmpty {
                         VStack(spacing: Space.xs) {
                             Text("No results")
                                 .font(.headline)
-                                .foregroundStyle(.secondary)
-                            Text("Search snippets by name, or type :emoji: like :fire: or :thumbsup:")
+                                .foregroundStyle(.white)
+                            Text("Type a snippet name, code like :rose:, or paste any emoji to inspect.")
                                 .font(.caption)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(Color.white.opacity(0.6))
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
 
-                // Footer
-                HStack {
+                // High Contrast HUD Footer
+                HStack(spacing: Space.sm) {
                     Text("↑↓ Navigate")
                     Text("•")
                     Text("↵ Insert")
@@ -314,21 +355,32 @@ struct FloatingSearchPanelContent: View {
                     Spacer()
                     if let target = controller.targetApp {
                         Text("Target: \(target.localizedName ?? "Active App")")
-                            .foregroundStyle(Palette.accentText)
+                            .foregroundStyle(Color(red: 0.45, green: 0.75, blue: 1.0))
+                            .fontWeight(.medium)
                     }
                 }
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.white.opacity(0.65))
                 .padding(.horizontal, Space.lg)
-                .frame(height: 28)
-                .background(.background.secondary)
-                .overlay(Divider(), alignment: .top)
+                .frame(height: 32)
+                .background(Color(red: 0.08, green: 0.09, blue: 0.11))
+                .overlay(
+                    Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1),
+                    alignment: .top
+                )
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator, lineWidth: 1))
+        .background(Color(red: 0.11, green: 0.12, blue: 0.14))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+        )
+        .onAppear {
+            isSearchFocused = true
+        }
         .onKeyPress(.downArrow) {
-            if controller.placeholderPrompt == nil && selectedIndex < totalItemCount - 1 {
+            if controller.placeholderPrompt == nil && selectedIndex < searchResults.count - 1 {
                 selectedIndex += 1
             }
             return .handled
@@ -349,10 +401,10 @@ struct FloatingSearchPanelContent: View {
     }
 
     private func selectCurrent() {
-        guard selectedIndex >= 0 && selectedIndex < totalItemCount else { return }
+        guard selectedIndex >= 0 && selectedIndex < searchResults.count else { return }
 
-        if selectedIndex < matchingSnippets.count {
-            let snippet = matchingSnippets[selectedIndex]
+        switch searchResults[selectedIndex] {
+        case .snippet(let snippet):
             if SnippetPlaceholders.hasPlaceholders(snippet.content) {
                 controller.placeholderPrompt = FloatingPanelController.PlaceholderPromptState(
                     snippetName: snippet.name,
@@ -362,12 +414,8 @@ struct FloatingSearchPanelContent: View {
             } else {
                 insertText(snippet.content)
             }
-        } else {
-            let emojiIndex = selectedIndex - matchingSnippets.count
-            if emojiIndex < matchingEmojis.count {
-                let emojiItem = matchingEmojis[emojiIndex]
-                insertText(emojiItem.emoji)
-            }
+        case .emoji(let emojiItem):
+            insertText(emojiItem.emoji)
         }
     }
 
@@ -380,7 +428,7 @@ struct FloatingSearchPanelContent: View {
     }
 }
 
-// MARK: - Row in Floating Panel
+// MARK: - Rows in Floating Panel
 
 private struct FloatingSnippetRow: View {
     let snippet: Snippet
@@ -389,24 +437,25 @@ private struct FloatingSnippetRow: View {
     var body: some View {
         HStack(spacing: Space.sm) {
             Image(systemName: "text.quote")
-                .foregroundStyle(isSelected ? Palette.onAccent : .secondary)
+                .font(.body)
+                .foregroundStyle(isSelected ? .white : Color(red: 0.45, green: 0.75, blue: 1.0))
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack {
+                HStack(spacing: Space.xs) {
                     Text(snippet.name)
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(isSelected ? Palette.onAccent : .primary)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white)
 
                     if !snippet.category.isEmpty {
                         Text(snippet.category)
-                            .font(.caption2)
+                            .font(.caption2.weight(.medium))
                             .padding(.horizontal, Space.xs)
                             .padding(.vertical, 1)
                             .background(
-                                isSelected ? Palette.onAccent.opacity(0.2) : Color.secondary.opacity(0.12),
+                                isSelected ? Color.white.opacity(0.25) : Color.white.opacity(0.12),
                                 in: Capsule()
                             )
-                            .foregroundStyle(isSelected ? Palette.onAccent : .secondary)
+                            .foregroundStyle(.white)
                     }
 
                     Spacer()
@@ -414,21 +463,31 @@ private struct FloatingSnippetRow: View {
                     if !snippet.alias.isEmpty {
                         Text(snippet.alias)
                             .font(.caption.monospaced())
-                            .foregroundStyle(isSelected ? Palette.onAccent : Palette.accentText)
+                            .foregroundStyle(isSelected ? .white : Color(red: 0.45, green: 0.75, blue: 1.0))
+                            .padding(.horizontal, Space.xs)
+                            .padding(.vertical, 1)
+                            .background(
+                                isSelected ? Color.white.opacity(0.2) : Color.black.opacity(0.3),
+                                in: RoundedRectangle(cornerRadius: 4)
+                            )
                     }
                 }
 
                 Text(snippet.content.replacingOccurrences(of: "\n", with: " "))
                     .font(.caption)
                     .lineLimit(1)
-                    .foregroundStyle(isSelected ? Palette.onAccent.opacity(0.8) : .secondary)
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.9) : Color.white.opacity(0.65))
             }
         }
         .padding(.horizontal, Space.md)
         .padding(.vertical, Space.sm)
         .background(
-            isSelected ? Palette.accent : Color.clear,
+            isSelected ? Palette.accent : Color.white.opacity(0.04),
             in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(isSelected ? Color.white.opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1)
         )
         .contentShape(Rectangle())
     }
@@ -441,17 +500,39 @@ private struct FloatingEmojiRow: View {
     var body: some View {
         HStack(spacing: Space.md) {
             Text(item.emoji)
-                .font(.title2)
-                .frame(width: 32)
+                .font(.system(size: 28))
+                .frame(width: 36, height: 36)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(isSelected ? Palette.onAccent : .primary)
+                HStack(spacing: Space.xs) {
+                    Text(item.name)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white)
+
+                    Text(item.category)
+                        .font(.caption2)
+                        .padding(.horizontal, Space.xs)
+                        .padding(.vertical, 1)
+                        .background(Color.white.opacity(0.12), in: Capsule())
+                        .foregroundStyle(Color.white.opacity(0.8))
+
+                    Spacer()
+
+                    Text(item.primaryAlias)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(isSelected ? .white : Color(red: 0.45, green: 0.75, blue: 1.0))
+                        .padding(.horizontal, Space.xs)
+                        .padding(.vertical, 1)
+                        .background(
+                            isSelected ? Color.white.opacity(0.2) : Color.black.opacity(0.3),
+                            in: RoundedRectangle(cornerRadius: 4)
+                        )
+                }
 
                 Text(item.aliases.joined(separator: "  "))
                     .font(.caption.monospaced())
-                    .foregroundStyle(isSelected ? Palette.onAccent.opacity(0.8) : Palette.accentText)
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.9) : Color.white.opacity(0.6))
+                    .lineLimit(1)
             }
 
             Spacer()
@@ -459,8 +540,12 @@ private struct FloatingEmojiRow: View {
         .padding(.horizontal, Space.md)
         .padding(.vertical, Space.xs)
         .background(
-            isSelected ? Palette.accent : Color.clear,
+            isSelected ? Palette.accent : Color.white.opacity(0.04),
             in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(isSelected ? Color.white.opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1)
         )
         .contentShape(Rectangle())
     }

@@ -66,6 +66,8 @@ struct ContentView: View {
             SnippetListView(filterFavourites: true)
         case .clipboard:
             ClipboardListView()
+        case .emojis:
+            EmojiBrowserView()
         case .stats:
             StatsView()
         case nil:
@@ -81,6 +83,8 @@ struct ContentView: View {
             SnippetDetailView()
         } else if model.sidebar == .clipboard {
             ClipboardDetailView()
+        } else if model.sidebar == .emojis {
+            EmojiDetailInspectorView()
         } else if model.sidebar == .stats {
             ContentUnavailableView("Insights Dashboard", systemImage: "chart.bar.xaxis", description: Text("Telemetry updates automatically in real-time as you use Kibo."))
         } else {
