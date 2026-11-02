@@ -88,8 +88,8 @@ struct ClipboardListView: View {
             // Paste-style Cards Grid
             ScrollView {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 156, maximum: 200), spacing: Space.md)],
-                    spacing: Space.md
+                    columns: [GridItem(.adaptive(minimum: 180, maximum: 240), spacing: Space.lg)],
+                    spacing: Space.lg
                 ) {
                     ForEach(filteredEntries) { entry in
                         ClipboardCard(
@@ -206,62 +206,77 @@ struct ClipboardCard: View {
         return NSImage(data: data)
     }
 
+    private var hasImage: Bool {
+        entry.imageData != nil
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
-            // Header: Pinned icon badge if pinned (No Date, as requested)
-            if entry.isPinned {
-                HStack {
-                    Spacer()
-                    Image(systemName: "pin.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header content
+            VStack(alignment: .leading, spacing: Space.xs) {
+                // Pin Badge if pinned (No date, as explicitly instructed)
+                if entry.isPinned {
+                    HStack {
+                        Spacer()
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
-            }
 
-            // Title in bold
-            Text(entry.title)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-
-            // Excerpt text if present
-            if !entry.content.isEmpty && entry.content != entry.title {
-                Text(entry.content.replacingOccurrences(of: "\n", with: " "))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(nsImage != nil ? 2 : 4)
+                // Title in bold white
+                Text(entry.title)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
                     .multilineTextAlignment(.leading)
+
+                // Subtitle snippet text if present
+                if !entry.content.isEmpty && entry.content != entry.title {
+                    Text(entry.content.replacingOccurrences(of: "\n", with: " "))
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color(red: 0.65, green: 0.67, blue: 0.72))
+                        .lineLimit(hasImage ? 2 : 4)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, Space.lg)
+            .padding(.top, Space.lg)
+            .padding(.bottom, hasImage ? Space.sm : Space.lg)
 
-            Spacer(minLength: 4)
-
-            // Image Thumbnail if present
+            // Image Thumbnail pinned at bottom if present
             if let img = nsImage {
                 Image(nsImage: img)
                     .resizable()
                     .scaledToFill()
-                    .frame(height: 72)
+                    .frame(height: 88)
                     .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    )
+                    .padding(.horizontal, Space.sm)
+                    .padding(.bottom, Space.sm)
             }
         }
-        .padding(Space.md)
-        .frame(minHeight: 148, maxHeight: 180)
+        .frame(minHeight: hasImage ? 220 : 160, maxHeight: hasImage ? 230 : 170)
         .background(
-            Color(nsColor: .controlBackgroundColor).opacity(0.85),
-            in: RoundedRectangle(cornerRadius: 20)
+            Color(red: 0.14, green: 0.15, blue: 0.17),
+            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(
-                    isSelected ? Palette.accent : Color.white.opacity(0.08),
-                    lineWidth: isSelected ? 2.5 : 1
+                    isSelected ? Color(red: 0.05, green: 0.52, blue: 1.0) : Color.white.opacity(0.06),
+                    lineWidth: isSelected ? 3 : 1
                 )
         )
-        .shadow(color: Color.black.opacity(isSelected ? 0.2 : 0.08), radius: isSelected ? 8 : 3, y: 2)
-        .contentShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color.black.opacity(isSelected ? 0.35 : 0.15), radius: isSelected ? 10 : 4, y: 3)
+        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 }
 

@@ -166,8 +166,15 @@ enum SelfTest {
             check("inline suggestions excluded in Slack by default", InlineSuggestionController.isAppExcluded(bundleID: "com.tinyspeck.slackmacgap", appName: "Slack"))
             check("inline suggestions enabled in Safari by default", !InlineSuggestionController.isAppExcluded(bundleID: "com.apple.Safari", appName: "Safari"))
 
-            // 10. Insights / Statistics
+            // 10. Insights / Statistics & Dynamic Direct-Input HUD
             check("stats page defined in sidebar", SidebarPage.allCases.contains(.stats))
+
+            let promptTest = PlaceholderPromptState(snippetName: "Hello", template: "Hi, my name is {{name}}", backspaces: 0)
+            check("placeholder prompt extracts placeholder", promptTest.placeholders.count == 1 && promptTest.placeholders.first?.key == "name")
+            promptTest.appendText("John")
+            check("direct input appendText updates substituted value", promptTest.substituted == "Hi, my name is John")
+            promptTest.backspace()
+            check("direct input backspace works", promptTest.substituted == "Hi, my name is Joh")
 
             // 11. Deletion & Cleanup
             if let converted = snippetsAfterConvert.first(where: { $0.content == "Testing Kibo Clipboard Monitor" }) {

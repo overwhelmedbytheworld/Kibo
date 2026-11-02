@@ -41,16 +41,73 @@ final class FloatingPanel: NSPanel {
 
 // MARK: - Floating Search Panel Controller
 
+final class PlaceholderPromptState: ObservableObject, Identifiable {
+    let id = UUID()
+    let snippetName: String
+    let template: String
+    let backspaces: Int
+    let placeholders: [SnippetPlaceholders.Placeholder]
+    @Published var values: [String: String] = [:]
+    @Published var activeIndex: Int = 0
+
+    init(snippetName: String, template: String, backspaces: Int = 0) {
+        self.snippetName = snippetName
+        self.template = template
+        self.backspaces = backspaces
+        let extracted = SnippetPlaceholders.extract(from: template)
+        self.placeholders = extracted
+        var initial: [String: String] = [:]
+        for p in extracted {
+            initial[p.key] = p.defaultValue ?? ""
+        }
+        self.values = initial
+        self.activeIndex = 0
+    }
+
+    var activeKey: String? {
+        guard activeIndex >= 0 && activeIndex < placeholders.count else { return nil }
+        return placeholders[activeIndex].key
+    }
+
+    var substituted: String {
+        SnippetPlaceholders.substitute(template: template, with: values)
+    }
+
+    func nextField() {
+        guard !placeholders.isEmpty else { return }
+        activeIndex = (activeIndex + 1) % placeholders.count
+    }
+
+    func prevField() {
+        guard !placeholders.isEmpty else { return }
+        activeIndex = (activeIndex - 1 + placeholders.count) % placeholders.count
+    }
+
+    func appendText(_ text: String) {
+        guard let key = activeKey else { return }
+        var current = values[key] ?? ""
+        current.append(text)
+        values[key] = current
+    }
+
+    func backspace() {
+        guard let key = activeKey else { return }
+        var current = values[key] ?? ""
+        if !current.isEmpty {
+            current.removeLast()
+            values[key] = current
+        }
+    }
+
+    func clearCurrent() {
+        guard let key = activeKey else { return }
+        values[key] = ""
+    }
+}
+
 @MainActor
 final class FloatingPanelController: ObservableObject {
     static let shared = FloatingPanelController()
-
-    struct PlaceholderPromptState: Identifiable {
-        let id = UUID()
-        let snippetName: String
-        let template: String
-        let backspaces: Int
-    }
 
     private var panel: FloatingPanel?
     private var hotKeyRef: EventHotKeyRef?
@@ -131,12 +188,58 @@ final class FloatingPanelController: ObservableObject {
             let p = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 580, height: 440))
             p.onKeyDown = { [weak self] event in
                 guard let self else { return false }
-                if self.placeholderPrompt != nil {
-                    if event.keyCode == 53 { // Escape
+                if let prompt = self.placeholderPrompt {
+                    switch event.keyCode {
+                    case 53: // Escape
                         self.hide()
                         return true
+                    case 36: // Return
+                        self.commitPlaceholderPrompt()
+                        return true
+                    case 48: // Tab
+                        if event.modifierFlags.contains(.shift) {
+                            prompt.prevField()
+                        } else {
+                            prompt.nextField()
+                        }
+                        return true
+                    case 125: // Down Arrow
+                        prompt.nextField()
+                        return true
+                    case 126: // Up Arrow
+                        prompt.prevField()
+                        return true
+                    case 51: // Backspace / Delete
+                        if event.modifierFlags.contains(.command) {
+                            prompt.clearCurrent()
+                        } else {
+                            prompt.backspace()
+                        }
+                        return true
+                    default:
+                        // ⌘V: Paste into variable
+                        if event.keyCode == 9 && event.modifierFlags.contains(.command) {
+                            if let pasted = NSPasteboard.general.string(forType: .string) {
+                                prompt.appendText(pasted)
+                                return true
+                            }
+                        }
+                        // ⌘A: Clear current variable
+                        if event.keyCode == 0 && event.modifierFlags.contains(.command) {
+                            prompt.clearCurrent()
+                            return true
+                        }
+                        // Printable characters without Command modifier
+                        if !event.modifierFlags.contains(.command),
+                           let chars = event.characters, !chars.isEmpty {
+                            let scalars = chars.unicodeScalars
+                            if let first = scalars.first, first.value >= 32 && first.value != 127 {
+                                prompt.appendText(chars)
+                                return true
+                            }
+                        }
+                        return false
                     }
-                    return false
                 }
 
                 switch event.keyCode {
@@ -238,6 +341,16 @@ final class FloatingPanelController: ObservableObject {
             backspaces: backspacesToErase
         )
         show(model: model)
+    }
+
+    func commitPlaceholderPrompt() {
+        guard let prompt = placeholderPrompt else { return }
+        let substituted = prompt.substituted
+        let target = targetApp
+        let backspaces = prompt.backspaces
+        hide()
+        TextInserter.insert(text: substituted, into: target, backspaces: backspaces)
+        SoundFeedback.playExpansionClick()
     }
 
     func hide() {
@@ -384,18 +497,10 @@ struct FloatingSearchPanelContent: View {
     var body: some View {
         VStack(spacing: 0) {
             if let prompt = controller.placeholderPrompt {
-                // Dynamic Variable Filling Mode
-                PlaceholderPromptView(
-                    snippetName: prompt.snippetName,
-                    template: prompt.template,
-                    onInsert: { finalContent in
-                        controller.hide()
-                        let target = controller.targetApp
-                        TextInserter.insert(text: finalContent, into: target, backspaces: prompt.backspaces)
-                    },
-                    onCancel: {
-                        controller.hide()
-                    }
+                // Dynamic Variable Direct-Input Mode (Always Active, Zero Mouse Clicking Needed)
+                PlaceholderPromptHUDView(
+                    prompt: prompt,
+                    controller: controller
                 )
             } else {
                 // Direct-Input Search Bar (Always Active, Zero Clicking Needed)
@@ -561,7 +666,7 @@ struct FloatingSearchPanelContent: View {
         switch searchResults[controller.selectedIndex] {
         case .snippet(let snippet):
             if SnippetPlaceholders.hasPlaceholders(snippet.content) {
-                controller.placeholderPrompt = FloatingPanelController.PlaceholderPromptState(
+                controller.placeholderPrompt = PlaceholderPromptState(
                     snippetName: snippet.name,
                     template: snippet.content,
                     backspaces: 0
@@ -711,3 +816,150 @@ private struct FloatingEmojiRow: View {
         .focusable(false)
     }
 }
+
+// MARK: - Direct-Input Variable HUD
+
+private struct PlaceholderPromptHUDView: View {
+    @ObservedObject var prompt: PlaceholderPromptState
+    @ObservedObject var controller: FloatingPanelController
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack(spacing: Space.sm) {
+                Image(systemName: "text.badge.plus")
+                    .font(.title3)
+                    .foregroundStyle(Color(red: 0.18, green: 0.82, blue: 0.44))
+
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(prompt.snippetName)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text("Type variable values. ⇥ or ↓ Next • ↵ Insert directly into app")
+                        .font(.caption2)
+                        .foregroundStyle(Color.white.opacity(0.6))
+                }
+
+                Spacer()
+
+                Button {
+                    controller.hide()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .font(.title3)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, Space.lg)
+            .frame(height: 56)
+            .background(Color(red: 0.14, green: 0.15, blue: 0.18))
+            .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .bottom)
+
+            // Variables List & Live Inputs
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.md) {
+                    Text("VARIABLES")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(Color.white.opacity(0.5))
+
+                    VStack(spacing: Space.sm) {
+                        ForEach(Array(prompt.placeholders.enumerated()), id: \.element.id) { index, p in
+                            let isActive = index == prompt.activeIndex
+                            let val = prompt.values[p.key] ?? ""
+
+                            HStack(spacing: Space.md) {
+                                Text("{{" + p.key + "}}")
+                                    .font(.caption.monospaced().weight(.semibold))
+                                    .foregroundStyle(isActive ? Color(red: 0.18, green: 0.82, blue: 0.44) : Color.white.opacity(0.7))
+                                    .frame(width: 120, alignment: .leading)
+
+                                HStack(spacing: Space.xs) {
+                                    if val.isEmpty {
+                                        Text(p.defaultValue.map { "Default: \($0)" } ?? "Type \(p.key)...")
+                                            .font(.body)
+                                            .foregroundStyle(Color.white.opacity(0.35))
+                                    } else {
+                                        Text(val)
+                                            .font(.body)
+                                            .foregroundStyle(.white)
+                                    }
+
+                                    if isActive {
+                                        BlinkingCursor()
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, Space.sm)
+                                .frame(height: 36)
+                                .background(
+                                    isActive ? Color(red: 0.20, green: 0.22, blue: 0.26) : Color(red: 0.14, green: 0.15, blue: 0.17),
+                                    in: RoundedRectangle(cornerRadius: 8)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .strokeBorder(
+                                            isActive ? Color(red: 0.18, green: 0.82, blue: 0.44) : Color.white.opacity(0.1),
+                                            lineWidth: isActive ? 2 : 1
+                                        )
+                                )
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                prompt.activeIndex = index
+                            }
+                        }
+                    }
+
+                    // Live Preview
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        Text("LIVE PREVIEW (WHAT WILL BE INSERTED)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Color.white.opacity(0.5))
+
+                        Text(prompt.substituted)
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .textSelection(.enabled)
+                            .padding(Space.md)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(red: 0.08, green: 0.09, blue: 0.11), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                    }
+                }
+                .padding(Space.lg)
+            }
+            .frame(maxHeight: 280)
+            .background(Color(red: 0.11, green: 0.12, blue: 0.14))
+
+            // Footer
+            HStack(spacing: Space.sm) {
+                Text("↵ Insert")
+                Text("•")
+                Text("⇥ / ↓ Next Field")
+                Text("•")
+                Text("esc Cancel")
+                Spacer()
+                if let target = controller.targetApp {
+                    Text("Target: \(target.localizedName ?? "Active App")")
+                        .foregroundStyle(Color(red: 0.45, green: 0.75, blue: 1.0))
+                        .fontWeight(.medium)
+                }
+
+                Button("Insert Text") {
+                    controller.commitPlaceholderPrompt()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            .font(.caption2)
+            .foregroundStyle(Color.white.opacity(0.65))
+            .padding(.horizontal, Space.lg)
+            .frame(height: 40)
+            .background(Color(red: 0.08, green: 0.09, blue: 0.11))
+            .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .top)
+        }
+    }
+}
+
+

@@ -12,7 +12,10 @@ struct ContentView: View {
             sidebar
         } content: {
             contentColumn
-                .navigationSplitViewColumnWidth(min: 280, ideal: 340)
+                .navigationSplitViewColumnWidth(
+                    min: model.sidebar == .clipboard ? 440 : 280,
+                    ideal: model.sidebar == .clipboard ? 560 : 340
+                )
         } detail: {
             detailColumn
         }
@@ -69,7 +72,7 @@ struct ContentView: View {
         case .emojis:
             EmojiBrowserView()
         case .stats:
-            StatsView()
+            StatsSidebarView()
         case nil:
             ContentUnavailableView("Select a Category", systemImage: "sidebar.left")
         }
@@ -86,11 +89,54 @@ struct ContentView: View {
         } else if model.sidebar == .emojis {
             EmojiDetailInspectorView()
         } else if model.sidebar == .stats {
-            ContentUnavailableView("Insights Dashboard", systemImage: "chart.bar.xaxis", description: Text("Telemetry updates automatically in real-time as you use Kibo."))
+            StatsView()
         } else {
             ContentUnavailableView("No Selection", systemImage: "doc.text")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+// MARK: - Stats Sidebar Summary View
+
+private struct StatsSidebarView: View {
+    @Query private var allSnippets: [Snippet]
+    @Query private var allClippings: [ClipboardEntry]
+
+    private var totalExpansions: Int {
+        allSnippets.reduce(0) { $0 + $1.usageCount }
+    }
+
+    private var totalKeystrokesSaved: Int {
+        allSnippets.reduce(0) { $0 + ($1.usageCount * max(1, $1.content.count)) }
+    }
+
+    var body: some View {
+        List {
+            Section("Quick Highlights") {
+                let seconds = Double(totalKeystrokesSaved) * 0.3
+                let timeStr = seconds < 60 ? "\(Int(seconds))s" : "\(Int(seconds / 60)) mins"
+
+                LabeledContent("Time Saved", value: timeStr)
+                LabeledContent("Total Expansions", value: "\(totalExpansions)")
+                LabeledContent("Keystrokes Saved", value: "\(totalKeystrokesSaved)")
+                LabeledContent("Clippings Stored", value: "\(allClippings.count)")
+            }
+
+            Section("Top Snippets") {
+                ForEach(allSnippets.sorted(by: { $0.usageCount > $1.usageCount }).prefix(5)) { s in
+                    HStack {
+                        Text(s.name)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("\(s.usageCount) uses")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Insights")
     }
 }
 
