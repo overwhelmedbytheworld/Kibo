@@ -3,23 +3,57 @@ import Foundation
 /// Rules for snippet aliases. Logic lives in this library so tests can run
 /// it without the app.
 public enum SnippetAlias {
-    /// Validates an alias: must start and end with `:`, contain only
-    /// lowercase letters, digits, and hyphens between the colons, and be
-    /// at least 3 characters inside (e.g. `:abc:`).
-    public static func isValid(_ alias: String) -> Bool {
-        let trimmed = alias.trimmingCharacters(in: .whitespaces)
-        guard trimmed.count >= 5,
-              trimmed.hasPrefix(":"),
-              trimmed.hasSuffix(":") else { return false }
-        let inner = trimmed.dropFirst().dropLast()
-        let allowed = CharacterSet.lowercaseLetters
-            .union(.decimalDigits)
-            .union(CharacterSet(charactersIn: "-"))
-        return inner.unicodeScalars.allSatisfy { allowed.contains($0) }
+    /// Result of evaluating an alias string.
+    public enum ValidationResult: Equatable, Sendable {
+        case valid
+        case empty
+        case missingColons
+        case tooShort
+        case invalidCharacters
+
+        public var message: String {
+            switch self {
+            case .valid:
+                return "Valid trigger alias"
+            case .empty:
+                return "Alias cannot be empty"
+            case .missingColons:
+                return "Must start and end with colons (e.g. :email:)"
+            case .tooShort:
+                return "Must have at least 2 characters between colons (e.g. :ai:)"
+            case .invalidCharacters:
+                return "Use only lowercase letters, numbers, hyphens (-), and underscores (_)"
+            }
+        }
     }
 
-    /// Cleans an alias: lowercases, trims whitespace, and wraps in colons
-    /// if not already present. Returns nil if the result is invalid.
+    /// Validates an alias with a detailed result.
+    public static func validate(_ alias: String) -> ValidationResult {
+        let trimmed = alias.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return .empty }
+        guard trimmed.hasPrefix(":") && trimmed.hasSuffix(":") && trimmed.count >= 2 else {
+            return .missingColons
+        }
+        let inner = trimmed.dropFirst().dropLast()
+        guard inner.count >= 2 else { return .tooShort }
+
+        let allowed = CharacterSet.lowercaseLetters
+            .union(.decimalDigits)
+            .union(CharacterSet(charactersIn: "-_"))
+
+        guard inner.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            return .invalidCharacters
+        }
+        return .valid
+    }
+
+    /// Returns true if the alias meets all syntax rules.
+    public static func isValid(_ alias: String) -> Bool {
+        validate(alias) == .valid
+    }
+
+    /// Normalises an alias: trims whitespace, lowercases, and wraps in colons.
+    /// Returns nil if the resulting string is still invalid.
     public static func clean(_ text: String) -> String? {
         var alias = text
             .trimmingCharacters(in: .whitespaces)

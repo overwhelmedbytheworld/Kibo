@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftData
 import KiboKit
@@ -12,7 +13,7 @@ final class Snippet {
     var alias: String
     /// The full text content. Preserves multiline, Unicode, whitespace exactly.
     var content: String
-    /// Optional category for organisation.
+    /// Optional category for organisation (e.g. Work, Study, Code).
     var category: String = ""
     var isFavourite: Bool = false
     var usageCount: Int = 0
@@ -22,10 +23,18 @@ final class Snippet {
     /// A stable id for links, sync, and the agent CLI.
     var uid: UUID = UUID()
 
-    init(name: String, alias: String, content: String) {
+    init(
+        name: String,
+        alias: String,
+        content: String,
+        category: String = "",
+        isFavourite: Bool = false
+    ) {
         self.name = name
         self.alias = alias
         self.content = content
+        self.category = category
+        self.isFavourite = isFavourite
     }
 }
 
@@ -62,6 +71,12 @@ final class AppModel {
     let container: ModelContainer
     var sidebar: SidebarPage? = .snippets
     var selection: PersistentIdentifier?
+    var searchText: String = ""
+    var selectedCategory: String? = nil
+
+    /// Transient notification when a snippet is copied.
+    var justCopiedUID: UUID? = nil
+
     /// Settings reopens on the last tab. Test and snapshot runs leave it alone.
     var settingsTab: SettingsTab = SettingsTab(rawValue: UserDefaults.standard.string(forKey: "settings.tab") ?? "") ?? .general {
         didSet { if !Store.isOverridden { UserDefaults.standard.set(settingsTab.rawValue, forKey: "settings.tab") } }
@@ -73,14 +88,76 @@ final class AppModel {
         self.container = container
     }
 
-    func addSnippet(name: String = "", alias: String = "", content: String = "") {
+    func addSnippet(
+        name: String = "",
+        alias: String = "",
+        content: String = "",
+        category: String = ""
+    ) {
         let snippet = Snippet(
             name: name.isEmpty ? "New Snippet" : name,
             alias: alias,
-            content: content
+            content: content,
+            category: category
         )
         if sidebar == .favourites { snippet.isFavourite = true }
         container.mainContext.insert(snippet)
+        try? container.mainContext.save()
         selection = snippet.id
+    }
+
+    func duplicateSnippet(_ snippet: Snippet) {
+        let newAlias: String
+        if snippet.alias.isEmpty {
+            newAlias = ""
+        } else if snippet.alias.hasSuffix(":") {
+            let inner = snippet.alias.dropFirst().dropLast()
+            newAlias = ":\(inner)-copy:"
+        } else {
+            newAlias = "\(snippet.alias)-copy"
+        }
+
+        let clone = Snippet(
+            name: "\(snippet.name) Copy",
+            alias: newAlias,
+            content: snippet.content,
+            category: snippet.category,
+            isFavourite: snippet.isFavourite
+        )
+        container.mainContext.insert(clone)
+        try? container.mainContext.save()
+        selection = clone.id
+    }
+
+    func deleteSnippet(_ snippet: Snippet) {
+        if selection == snippet.id {
+            selection = nil
+        }
+        container.mainContext.delete(snippet)
+        try? container.mainContext.save()
+    }
+
+    func toggleFavourite(_ snippet: Snippet) {
+        snippet.isFavourite.toggle()
+        snippet.modifiedAt = .now
+        try? container.mainContext.save()
+    }
+
+    func copyToClipboard(_ snippet: Snippet) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(snippet.content, forType: .string)
+
+        snippet.usageCount += 1
+        snippet.lastUsedAt = .now
+        try? container.mainContext.save()
+
+        justCopiedUID = snippet.uid
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.8))
+            if self.justCopiedUID == snippet.uid {
+                self.justCopiedUID = nil
+            }
+        }
     }
 }

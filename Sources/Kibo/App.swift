@@ -43,6 +43,45 @@ struct KiboApp: App {
                 Button("New Snippet") { model.addSnippet() }
                     .keyboardShortcut("n")
             }
+            CommandMenu("Snippet") {
+                Button("Copy Snippet Content") {
+                    if let id = model.selection,
+                       let s = try? model.container.mainContext.fetch(FetchDescriptor<Snippet>()).first(where: { $0.id == id }) {
+                        model.copyToClipboard(s)
+                    }
+                }
+                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(model.selection == nil)
+
+                Button("Toggle Favourite") {
+                    if let id = model.selection,
+                       let s = try? model.container.mainContext.fetch(FetchDescriptor<Snippet>()).first(where: { $0.id == id }) {
+                        model.toggleFavourite(s)
+                    }
+                }
+                .keyboardShortcut("s", modifiers: [.command])
+                .disabled(model.selection == nil)
+
+                Button("Duplicate Snippet") {
+                    if let id = model.selection,
+                       let s = try? model.container.mainContext.fetch(FetchDescriptor<Snippet>()).first(where: { $0.id == id }) {
+                        model.duplicateSnippet(s)
+                    }
+                }
+                .keyboardShortcut("d", modifiers: [.command])
+                .disabled(model.selection == nil)
+
+                Divider()
+
+                Button("Delete Snippet") {
+                    if let id = model.selection,
+                       let s = try? model.container.mainContext.fetch(FetchDescriptor<Snippet>()).first(where: { $0.id == id }) {
+                        model.deleteSnippet(s)
+                    }
+                }
+                .keyboardShortcut(.delete, modifiers: [.command])
+                .disabled(model.selection == nil)
+            }
         }
 
         // Menu bar presence — always visible.
