@@ -44,9 +44,6 @@ final class FloatingPanel: NSPanel {
 // ═══════════════════════════════════════════════════════════════════════════
 // MARK: 2 — AppKit Search TextField (NSViewRepresentable)
 // ═══════════════════════════════════════════════════════════════════════════
-// Direct typing into NSTextField at native 120 FPS.
-// Keystrokes are handled by AppKit with zero latency.
-// Updates to controller.query occur via debounced typing notifications.
 
 final class PanelSearchTextField: NSTextField {
     override func viewDidMoveToWindow() {
@@ -110,14 +107,14 @@ struct CommandBarSearchField: NSViewRepresentable {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MARK: 3 — Display Models (Pre-computed, O(1) Index Lookups)
+// MARK: 3 — Display Models
 // ═══════════════════════════════════════════════════════════════════════════
 
 struct DisplayRow: Identifiable {
     let id: String
     let index: Int
     let emoji: String?
-    var emojiChar: String? { emoji } // API compatibility with existing tests
+    var emojiChar: String? { emoji }
     let title: String
     let category: String
     let primaryCode: String
@@ -243,14 +240,13 @@ final class FloatingPanelController: ObservableObject {
     @Published var isVisible = false
     @Published var query: String = "" {
         didSet {
-            if query != oldValue {
-                selectedIndex = 0
-                refreshTrackerCache()
-                buildResults(for: query.trimmingCharacters(in: .whitespaces))
-            }
+            guard query != oldValue else { return }
+            selectedIndex = 0
+            refreshTrackerCache()
+            buildResults(for: query.trimmingCharacters(in: .whitespaces))
         }
     }
-    var flattenedItems: [DisplayRow] { flatRows } // API compatibility
+    var flattenedItems: [DisplayRow] { flatRows }
     @Published var selectedIndex: Int = 0
     @Published var sections: [DisplaySection] = []
     @Published var flatRows: [DisplayRow] = []
@@ -263,9 +259,6 @@ final class FloatingPanelController: ObservableObject {
     @Published var shortcodesBanner: (name: String, codes: [String])? = nil
     @Published var toastMessage: String? = nil
     @Published var placeholderPrompt: PlaceholderPromptState?
-
-    private var searchTask: Task<Void, Never>?
-    private var pendingQuery: String?
 
     // Cached tracker data read once per search batch
     private var cachedUsage: [String: Int] = [:]
@@ -385,42 +378,13 @@ final class FloatingPanelController: ObservableObject {
 
     // ── Input & Search ──
 
-    /// Called by the NSTextField delegate whenever the user types.
-    /// Batches keystrokes with a 25ms debounce to prevent redundant UI rebuilds.
+    /// Called synchronously by NSTextField delegate when user types.
+    /// Updates query immediately for instant zero-latency rendering.
     func onUserTyped(_ text: String) {
-        searchTask?.cancel()
-        pendingQuery = text
-
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        if trimmed.isEmpty {
-            pendingQuery = nil
-            self.query = ""
-            return
-        }
-
-        searchTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(25))
-            guard !Task.isCancelled else { return }
-            self.pendingQuery = nil
-            self.query = text
-        }
+        self.query = text
     }
 
-    /// Flushes any pending debounced search immediately (e.g. before navigation or commit).
-    private func flushPendingSearch() {
-        if let pending = pendingQuery {
-            searchTask?.cancel()
-            searchTask = nil
-            pendingQuery = nil
-            self.query = pending
-        }
-    }
-
-    /// Immediate programmatic clear (X button / Escape).
     func clearQuery() {
-        searchTask?.cancel()
-        searchTask = nil
-        pendingQuery = nil
         query = ""
         selectedIndex = 0
         refreshTrackerCache()
@@ -428,7 +392,6 @@ final class FloatingPanelController: ObservableObject {
     }
 
     func updateSearchResults() {
-        flushPendingSearch()
         refreshTrackerCache()
         buildResults(for: query.trimmingCharacters(in: .whitespaces))
     }
@@ -450,25 +413,25 @@ final class FloatingPanelController: ObservableObject {
 
             // Favorites
             for e in EmojiCatalog.all where cachedFavs.contains(e.emoji) && !cachedHidden.contains(e.emoji) {
-                sugg.append(emojiRow(e, index: idx)); idx += 1
+                sugg.append(emojiRow(e, section: "sugg", index: idx)); idx += 1
             }
             // Frequently used emojis (top 12)
             let used = EmojiCatalog.all
                 .filter { (cachedUsage[$0.emoji] ?? 0) > 0 && !cachedFavs.contains($0.emoji) && !cachedHidden.contains($0.emoji) }
                 .sorted { (cachedUsage[$0.emoji] ?? 0) > (cachedUsage[$1.emoji] ?? 0) }
             for e in used.prefix(12) {
-                sugg.append(emojiRow(e, index: idx)); idx += 1
+                sugg.append(emojiRow(e, section: "sugg", index: idx)); idx += 1
             }
             // Frequently used snippets (top 5)
             for s in snippets.filter({ $0.usageCount > 0 }).sorted(by: { $0.usageCount > $1.usageCount }).prefix(5) {
-                sugg.append(snippetRow(s, index: idx)); idx += 1
+                sugg.append(snippetRow(s, section: "sugg", index: idx)); idx += 1
             }
             // Fallback essential emojis
             if sugg.count < 6 {
                 for ch in ["🔥", "👍", "🙏", "❤️", "😂", "😍", "✨", "🚀", "🎉", "☕", "🍕", "🌹"] {
                     if let e = EmojiCatalog.all.first(where: { $0.emoji == ch }),
                        !sugg.contains(where: { $0.emoji == ch }) {
-                        sugg.append(emojiRow(e, index: idx)); idx += 1
+                        sugg.append(emojiRow(e, section: "sugg", index: idx)); idx += 1
                     }
                 }
             }
@@ -478,14 +441,14 @@ final class FloatingPanelController: ObservableObject {
             // Top initial batch of all emojis
             var allRows: [DisplayRow] = []
             for e in EmojiCatalog.all.prefix(40) where !cachedHidden.contains(e.emoji) {
-                allRows.append(emojiRow(e, index: idx)); idx += 1
+                allRows.append(emojiRow(e, section: "all", index: idx)); idx += 1
             }
             sects.append(DisplaySection(id: "all", title: "All Emojis", rows: allRows))
 
             if !snippets.isEmpty {
                 var snipRows: [DisplayRow] = []
                 for s in snippets.prefix(10) {
-                    snipRows.append(snippetRow(s, index: idx)); idx += 1
+                    snipRows.append(snippetRow(s, section: "all_snip", index: idx)); idx += 1
                 }
                 sects.append(DisplaySection(id: "snippets", title: "Snippets", rows: snipRows))
             }
@@ -512,25 +475,25 @@ final class FloatingPanelController: ObservableObject {
         if !emojiHits.isEmpty {
             var rows: [DisplayRow] = []
             for e in emojiHits.prefix(40) {
-                rows.append(emojiRow(e, index: idx)); idx += 1
+                rows.append(emojiRow(e, section: "search", index: idx)); idx += 1
             }
-            sects.append(DisplaySection(id: "emojis", title: "Emojis", rows: rows))
+            sects.append(DisplaySection(id: "search_emojis", title: "Emojis", rows: rows))
         }
         if !snippetHits.isEmpty {
             var rows: [DisplayRow] = []
             for s in snippetHits.prefix(15) {
-                rows.append(snippetRow(s, index: idx)); idx += 1
+                rows.append(snippetRow(s, section: "search_snip", index: idx)); idx += 1
             }
-            sects.append(DisplaySection(id: "snippets", title: "Snippets", rows: rows))
+            sects.append(DisplaySection(id: "search_snippets", title: "Snippets", rows: rows))
         }
 
         sections = sects
         flatRows = sects.flatMap(\.rows)
     }
 
-    private func emojiRow(_ e: EmojiItem, index: Int) -> DisplayRow {
+    private func emojiRow(_ e: EmojiItem, section: String, index: Int) -> DisplayRow {
         DisplayRow(
-            id: "e_\(e.id)",
+            id: "\(section)_\(e.id)",
             index: index,
             emoji: e.emoji,
             title: e.name,
@@ -545,9 +508,9 @@ final class FloatingPanelController: ObservableObject {
         )
     }
 
-    private func snippetRow(_ s: Snippet, index: Int) -> DisplayRow {
+    private func snippetRow(_ s: Snippet, section: String, index: Int) -> DisplayRow {
         DisplayRow(
-            id: "s_\(s.id)",
+            id: "\(section)_\(s.id)",
             index: index,
             emoji: nil,
             title: s.name,
@@ -565,7 +528,6 @@ final class FloatingPanelController: ObservableObject {
     // ── Navigation ──
 
     func moveDown() {
-        flushPendingSearch()
         if isActionsMenuOpen {
             let count = currentActions.count
             if actionIndex < count - 1 { actionIndex += 1 }
@@ -575,7 +537,6 @@ final class FloatingPanelController: ObservableObject {
     }
 
     func moveUp() {
-        flushPendingSearch()
         if isActionsMenuOpen {
             if actionIndex > 0 { actionIndex -= 1 }
         } else if selectedIndex > 0 {
@@ -584,7 +545,6 @@ final class FloatingPanelController: ObservableObject {
     }
 
     func moveToStart() {
-        flushPendingSearch()
         if isActionsMenuOpen {
             actionIndex = 0
         } else {
@@ -593,7 +553,6 @@ final class FloatingPanelController: ObservableObject {
     }
 
     func moveToEnd() {
-        flushPendingSearch()
         if isActionsMenuOpen {
             actionIndex = max(0, currentActions.count - 1)
         } else {
@@ -602,7 +561,6 @@ final class FloatingPanelController: ObservableObject {
     }
 
     func commit() {
-        flushPendingSearch()
         if isActionsMenuOpen {
             let a = currentActions
             guard actionIndex >= 0 && actionIndex < a.count else { return }
@@ -620,7 +578,6 @@ final class FloatingPanelController: ObservableObject {
     }
 
     func toggleActionsMenu() {
-        flushPendingSearch()
         isActionsMenuOpen.toggle()
         actionIndex = 0
         actionQuery = ""
@@ -987,7 +944,7 @@ struct FloatingSearchPanelContent: View {
     private var resultsList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(controller.sections) { section in
                         Text(section.title)
                             .font(.system(size: 11, weight: .semibold))
@@ -998,7 +955,7 @@ struct FloatingSearchPanelContent: View {
 
                         ForEach(section.rows) { row in
                             RowView(row: row, isSelected: row.index == controller.selectedIndex)
-                                .id(row.index)
+                                .id(row.id)
                                 .onTapGesture {
                                     controller.selectedIndex = row.index
                                     controller.commit()
@@ -1011,8 +968,15 @@ struct FloatingSearchPanelContent: View {
             }
             .frame(maxHeight: .infinity)
             .background(Color(red: 0.11, green: 0.12, blue: 0.14))
-            .onChange(of: controller.selectedIndex) { _, idx in
-                proxy.scrollTo(idx, anchor: .center)
+            .onChange(of: controller.selectedIndex) { _, _ in
+                if let sel = controller.selectedRow {
+                    proxy.scrollTo(sel.id, anchor: .center)
+                }
+            }
+            .onChange(of: controller.flatRows.first?.id) { _, firstId in
+                if let firstId {
+                    proxy.scrollTo(firstId, anchor: .top)
+                }
             }
         }
         .overlay {
