@@ -185,6 +185,62 @@ enum SelfTest {
             check("deleteSnippet restores initial count", finalCount == initialCount)
             check("selection cleared after deleting active snippet", model.selection == nil)
 
+            // 12. Command+Shift+K Command Bar, Universal Search, Ranking & ⌘K Action Menu
+            let controller = FloatingPanelController.shared
+            controller.show(model: model)
+            check("command bar isVisible after show", controller.isVisible)
+
+            // Search filtering across 1,723+ emoji catalog
+            let roseSearch = EmojiCatalog.filter(query: "rose")
+            check("command bar search 'rose' returns 🌹", roseSearch.first?.emoji == "🌹")
+
+            let fireSearch = EmojiCatalog.filter(query: "fire")
+            check("command bar search 'fire' returns 🔥", fireSearch.first?.emoji == "🔥")
+
+            let catSearch = EmojiCatalog.filter(query: "cat")
+            check("command bar search 'cat' finds cat emojis", catSearch.contains(where: { $0.emoji == "🐱" || $0.emoji == "🐈" }))
+
+            let dogSearch = EmojiCatalog.filter(query: "dog")
+            check("command bar search 'dog' finds dog emojis", dogSearch.contains(where: { $0.emoji == "🐶" || $0.emoji == "🐕" }))
+
+            let coffeeSearch = EmojiCatalog.filter(query: "coffee")
+            check("command bar search 'coffee' returns ☕", coffeeSearch.first?.emoji == "☕")
+
+            let exactShortcode = EmojiCatalog.filter(query: ":fire:")
+            check("command bar exact shortcode :fire: matches 🔥", exactShortcode.first?.emoji == "🔥")
+
+            let multiWord = EmojiCatalog.filter(query: "folded hands")
+            check("command bar multi-word 'folded hands' returns 🙏", multiWord.first?.emoji == "🙏")
+
+            // Favorite and Ranking Operations
+            EmojiUsageTracker.shared.toggleFavorite("🌹")
+            check("emoji favorites contains 🌹", EmojiUsageTracker.shared.isFavorite("🌹"))
+
+            EmojiUsageTracker.shared.recordUsage(emoji: "🌹")
+            check("emoji usage for 🌹 is recorded", EmojiUsageTracker.shared.usageCount(for: "🌹") > 0)
+
+            EmojiUsageTracker.shared.resetRanking(for: "🌹")
+            check("resetRanking clears count for 🌹", EmojiUsageTracker.shared.usageCount(for: "🌹") == 0)
+
+            EmojiUsageTracker.shared.toggleFavorite("🌹") // toggle back off
+            check("toggleFavorite removes 🌹", !EmojiUsageTracker.shared.isFavorite("🌹"))
+
+            // Hidden from search operations
+            EmojiUsageTracker.shared.toggleHidden("💀")
+            check("hidden contains 💀", EmojiUsageTracker.shared.isHidden("💀"))
+            let afterHidden = EmojiCatalog.filter(query: "skull", hidden: EmojiUsageTracker.shared.getHidden())
+            check("filter excludes hidden 💀", !afterHidden.contains(where: { $0.emoji == "💀" }))
+            EmojiUsageTracker.shared.toggleHidden("💀") // restore
+
+            // Actions Menu toggling
+            controller.toggleActionsMenu()
+            check("toggleActionsMenu opens actions menu", controller.isActionsMenuOpen)
+            controller.toggleActionsMenu()
+            check("toggleActionsMenu closes actions menu", !controller.isActionsMenuOpen)
+
+            controller.hide()
+            check("command bar is hidden after hide", !controller.isVisible)
+
             print(failures == 0 ? "SELFTEST PASS \(count) checks" : "SELFTEST FAIL \(failures) of \(count) checks")
             finish(code: failures == 0 ? 0 : 1)
         }

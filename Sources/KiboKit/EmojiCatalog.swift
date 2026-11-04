@@ -133,19 +133,26 @@ public enum EmojiCatalog {
     public static func filter(
         query: String,
         category: String? = nil,
-        usageCounts: [String: Int] = [:]
+        usageCounts: [String: Int] = [:],
+        favorites: Set<String> = [],
+        hidden: Set<String> = []
     ) -> [EmojiItem] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseItems: [EmojiItem]
         if let cat = category, !cat.isEmpty && cat != "All" {
-            baseItems = all.filter { $0.category.localizedCaseInsensitiveCompare(cat) == .orderedSame }
+            baseItems = all.filter {
+                $0.category.localizedCaseInsensitiveCompare(cat) == .orderedSame && !hidden.contains($0.emoji)
+            }
         } else {
-            baseItems = all
+            baseItems = all.filter { !hidden.contains($0.emoji) }
         }
 
-        // Empty query: sort by usage count first, then default order
+        // Empty query: sort by favorites first, then usage count, then default order
         if trimmed.isEmpty {
             return baseItems.sorted { item1, item2 in
+                let fav1 = favorites.contains(item1.emoji)
+                let fav2 = favorites.contains(item2.emoji)
+                if fav1 != fav2 { return fav1 }
                 let count1 = usageCounts[item1.emoji] ?? 0
                 let count2 = usageCounts[item2.emoji] ?? 0
                 if count1 != count2 { return count1 > count2 }
@@ -173,6 +180,7 @@ public enum EmojiCatalog {
         for item in baseItems {
             var score = 0
             let itemNameLower = item.name.lowercased()
+            let itemWords = itemNameLower.split(whereSeparator: \.isWhitespace).map(String.init)
             let itemCondensedName = itemNameLower.replacingOccurrences(of: "_", with: "").replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
 
             let cleanAliases = item.aliases.map {
@@ -197,12 +205,29 @@ public enum EmojiCatalog {
                 score += 3500
             }
 
-            // 4. Alias prefix match
+            // 4. Exact word match in name (e.g. searching "cat" matches "Cat Face" or "Cat")
+            if itemWords.contains(clean) {
+                score += 3200
+            } else if itemWords.contains(where: { $0.hasPrefix(clean) }) {
+                score += 2600
+            }
+
+            // 5. Alias prefix match
             if cleanAliases.contains(where: { $0.hasPrefix(clean) }) || condAliases.contains(where: { $0.hasPrefix(condensed) }) {
                 score += 3000
             }
 
-            // 5. All query words match in name, keywords, or aliases
+            // 6. Alias component word match (e.g. alias "thumbs_up" matches word "thumbs")
+            for alias in cleanAliases {
+                let parts = alias.split(whereSeparator: { $0 == "_" || $0 == "-" }).map(String.init)
+                if parts.contains(clean) {
+                    score += 2800
+                } else if parts.contains(where: { $0.hasPrefix(clean) }) {
+                    score += 2200
+                }
+            }
+
+            // 7. All query words match in name, keywords, or aliases
             if !queryWords.isEmpty {
                 let allWordsMatch = queryWords.allSatisfy { word in
                     itemNameLower.contains(word) ||
@@ -214,7 +239,7 @@ public enum EmojiCatalog {
                 }
             }
 
-            // 6. Word-level scoring
+            // 8. Word-level scoring
             for word in queryWords {
                 if cleanAliases.contains(word) {
                     score += 1500
@@ -231,12 +256,14 @@ public enum EmojiCatalog {
                 score += 400
             }
 
-            // 7. Usage frequency bonus
-            if let usage = usageCounts[item.emoji], usage > 0 {
-                score += min(usage * 50, 1000)
-            }
-
+            // 9. If query matched, apply favorite and usage boosts
             if score > 0 {
+                if favorites.contains(item.emoji) {
+                    score += 800
+                }
+                if let usage = usageCounts[item.emoji], usage > 0 {
+                    score += min(usage * 50, 1000)
+                }
                 scoredItems.append((item, score))
             }
         }
