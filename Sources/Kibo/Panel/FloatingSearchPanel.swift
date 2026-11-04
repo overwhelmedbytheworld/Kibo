@@ -4,7 +4,7 @@ import SwiftData
 import SwiftUI
 import KiboKit
 
-// MARK: - Custom Floating Panel with Key Window Support
+// MARK: - Floating HUD Panel (AppKit NSPanel with Key Window Support)
 
 final class FloatingPanel: NSPanel {
     var onKeyDown: ((NSEvent) -> Bool)?
@@ -12,20 +12,27 @@ final class FloatingPanel: NSPanel {
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
-            styleMask: [.borderless, .fullSizeContentView],
+            styleMask: [.titled, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         isFloatingPanel = true
-        level = .popUpMenu // Floating HUD above all standard windows
+        level = .popUpMenu // Floating HUD above standard windows and full-screen spaces
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
+
+        // Hide standard window decorations to create a borderless HUD appearance
+        titlebarAppearsTransparent = true
+        titleVisibility = .hidden
+        standardWindowButton(.closeButton)?.isHidden = true
+        standardWindowButton(.miniaturizeButton)?.isHidden = true
+        standardWindowButton(.zoomButton)?.isHidden = true
     }
 
-    /// Essential for allowing text input inside text fields.
+    /// Essential for allowing keyboard input inside text fields.
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
@@ -39,153 +46,59 @@ final class FloatingPanel: NSPanel {
     }
 }
 
-// MARK: - Native Focused Command Search Bar
+// MARK: - Models
 
-final class CommandSearchTextField: NSTextField {
-    var onEscapePressed: (() -> Void)?
-    var onReturnPressed: (() -> Void)?
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        focusField()
-    }
-
-    func focusField() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let win = self.window else { return }
-            win.makeFirstResponder(self)
-            self.currentEditor()?.moveToEndOfLine(nil)
-        }
-    }
+enum CommandBarItemType: Equatable {
+    case emoji(EmojiItem)
+    case snippet(Snippet)
 }
 
-struct CommandSearchBar: NSViewRepresentable {
-    @Binding var text: String
-    var placeholder: String
-    var onCommit: () -> Void
-    var onEscape: () -> Void
+struct CommandBarItem: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let category: String
+    let primaryCode: String
+    let emojiChar: String?
+    let allShortcodes: [String]
+    let content: String
+    let type: CommandBarItemType
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeNSView(context: Context) -> CommandSearchTextField {
-        let tf = CommandSearchTextField()
-        tf.delegate = context.coordinator
-        tf.isBordered = false
-        tf.drawsBackground = false
-        tf.focusRingType = .none
-        tf.font = .systemFont(ofSize: 18, weight: .regular)
-        tf.textColor = .white
-        tf.placeholderAttributedString = NSAttributedString(
-            string: placeholder,
-            attributes: [
-                .foregroundColor: NSColor.white.withAlphaComponent(0.38),
-                .font: NSFont.systemFont(ofSize: 18, weight: .regular)
-            ]
+    static func emojiItem(_ e: EmojiItem) -> CommandBarItem {
+        CommandBarItem(
+            id: "e_\(e.id)",
+            title: e.name,
+            category: e.category,
+            primaryCode: e.primaryAlias,
+            emojiChar: e.emoji,
+            allShortcodes: e.aliases,
+            content: e.emoji,
+            type: .emoji(e)
         )
-        tf.target = context.coordinator
-        tf.action = #selector(Coordinator.performSubmit)
-        context.coordinator.textField = tf
-        return tf
     }
 
-    func updateNSView(_ nsView: CommandSearchTextField, context: Context) {
-        if nsView.stringValue != text {
-            nsView.stringValue = text
-        }
-        if context.environment.isEnabled {
-            nsView.focusField()
-        }
+    static func snippetItem(_ s: Snippet) -> CommandBarItem {
+        CommandBarItem(
+            id: "s_\(s.id)",
+            title: s.name,
+            category: s.category.isEmpty ? "Snippet" : s.category,
+            primaryCode: s.alias.isEmpty ? "Snippet" : s.alias,
+            emojiChar: nil,
+            allShortcodes: s.alias.isEmpty ? [] : [s.alias],
+            content: s.content,
+            type: .snippet(s)
+        )
     }
 
-    class Coordinator: NSObject, NSTextFieldDelegate {
-        var parent: CommandSearchBar
-        weak var textField: CommandSearchTextField?
-
-        init(_ parent: CommandSearchBar) {
-            self.parent = parent
-        }
-
-        func controlTextDidChange(_ obj: Notification) {
-            if let tf = obj.object as? NSTextField {
-                parent.text = tf.stringValue
-            }
-        }
-
-        @objc func performSubmit() {
-            parent.onCommit()
-        }
+    static func == (lhs: CommandBarItem, rhs: CommandBarItem) -> Bool {
+        lhs.id == rhs.id
     }
 }
 
-// MARK: - Floating Search Panel Controller
-
-final class PlaceholderPromptState: ObservableObject, Identifiable {
-    let id = UUID()
-    let snippetName: String
-    let template: String
-    let backspaces: Int
-    let placeholders: [SnippetPlaceholders.Placeholder]
-    @Published var values: [String: String] = [:]
-    @Published var activeIndex: Int = 0
-
-    init(snippetName: String, template: String, backspaces: Int = 0) {
-        self.snippetName = snippetName
-        self.template = template
-        self.backspaces = backspaces
-        let extracted = SnippetPlaceholders.extract(from: template)
-        self.placeholders = extracted
-        var initial: [String: String] = [:]
-        for p in extracted {
-            initial[p.key] = p.defaultValue ?? ""
-        }
-        self.values = initial
-        self.activeIndex = 0
-    }
-
-    var activeKey: String? {
-        guard activeIndex >= 0 && activeIndex < placeholders.count else { return nil }
-        return placeholders[activeIndex].key
-    }
-
-    var substituted: String {
-        SnippetPlaceholders.substitute(template: template, with: values)
-    }
-
-    func nextField() {
-        guard !placeholders.isEmpty else { return }
-        activeIndex = (activeIndex + 1) % placeholders.count
-    }
-
-    func prevField() {
-        guard !placeholders.isEmpty else { return }
-        activeIndex = (activeIndex - 1 + placeholders.count) % placeholders.count
-    }
-
-    func appendText(_ text: String) {
-        guard let key = activeKey else { return }
-        var current = values[key] ?? ""
-        current.append(text)
-        values[key] = current
-    }
-
-    func backspace() {
-        guard let key = activeKey else { return }
-        var current = values[key] ?? ""
-        if !current.isEmpty {
-            current.removeLast()
-            values[key] = current
-        }
-    }
-
-    func clearCurrent() {
-        guard let key = activeKey else { return }
-        values[key] = ""
-    }
+struct CommandBarSection: Identifiable {
+    let id: String
+    let title: String
+    let items: [CommandBarItem]
 }
-
-// MARK: - Action Item Model for ⌘K Actions Menu
 
 struct ActionItem: Identifiable, Sendable {
     let id: String
@@ -212,20 +125,92 @@ struct ActionItem: Identifiable, Sendable {
     }
 }
 
+// MARK: - Placeholder Prompt State (For Variable Snippets)
+
+final class PlaceholderPromptState: ObservableObject, Identifiable {
+    let id = UUID()
+    let snippetName: String
+    let template: String
+    let placeholders: [SnippetPlaceholders.Placeholder]
+    let backspaces: Int
+
+    @Published var values: [String: String] = [:]
+    @Published var activeIndex: Int = 0
+
+    init(snippetName: String, template: String, backspaces: Int = 0) {
+        self.snippetName = snippetName
+        self.template = template
+        self.backspaces = backspaces
+        self.placeholders = SnippetPlaceholders.extract(from: template)
+        for p in placeholders {
+            values[p.key] = p.defaultValue ?? ""
+        }
+    }
+
+    var substituted: String {
+        SnippetPlaceholders.substitute(template: template, with: values)
+    }
+
+    var activePlaceholder: SnippetPlaceholders.Placeholder? {
+        guard activeIndex >= 0 && activeIndex < placeholders.count else { return nil }
+        return placeholders[activeIndex]
+    }
+
+    func nextField() {
+        guard !placeholders.isEmpty else { return }
+        activeIndex = (activeIndex + 1) % placeholders.count
+    }
+
+    func prevField() {
+        guard !placeholders.isEmpty else { return }
+        activeIndex = (activeIndex - 1 + placeholders.count) % placeholders.count
+    }
+
+    func appendText(_ text: String) {
+        guard let p = activePlaceholder else { return }
+        values[p.key] = (values[p.key] ?? "") + text
+    }
+
+    func backspace() {
+        guard let p = activePlaceholder else { return }
+        var current = values[p.key] ?? ""
+        if !current.isEmpty {
+            current.removeLast()
+            values[p.key] = current
+        }
+    }
+
+    func clearCurrent() {
+        guard let p = activePlaceholder else { return }
+        values[p.key] = ""
+    }
+}
+
+// MARK: - Floating Panel Controller
+
 @MainActor
 final class FloatingPanelController: ObservableObject {
     static let shared = FloatingPanelController()
 
-    private var panel: FloatingPanel?
+    private(set) var panel: FloatingPanel?
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
     private(set) var targetApp: NSRunningApplication?
     private weak var appModel: AppModel?
 
     @Published var isVisible = false
-    @Published var placeholderPrompt: PlaceholderPromptState?
+    @Published var query: String = "" {
+        didSet {
+            if query != oldValue {
+                selectedIndex = 0
+                updateSearchResults()
+            }
+        }
+    }
     @Published var selectedIndex: Int = 0
-    @Published var query: String = ""
+    @Published var sections: [CommandBarSection] = []
+    @Published var flattenedItems: [CommandBarItem] = []
+    @Published var focusToken: Int = 0
 
     // ⌘K Action Menu State
     @Published var isActionsMenuOpen = false
@@ -234,18 +219,8 @@ final class FloatingPanelController: ObservableObject {
     @Published var shortcodesBanner: (name: String, codes: [String])? = nil
     @Published var toastMessage: String? = nil
 
-    var onCommit: (() -> Void)?
-    var onMoveDown: (() -> Void)?
-    var onMoveUp: (() -> Void)?
-    var onActionCommit: (() -> Void)?
-    var onActionMoveDown: (() -> Void)?
-    var onActionMoveUp: (() -> Void)?
-    var onCopyContent: (() -> Void)?
-    var onCopyShortcode: (() -> Void)?
-    var onToggleFavorite: (() -> Void)?
-    var onResetRanking: (() -> Void)?
-    var onHideItem: (() -> Void)?
-    var onShowShortcodes: (() -> Void)?
+    // Variable Direct Input HUD
+    @Published var placeholderPrompt: PlaceholderPromptState?
 
     private init() {
         registerGlobalHotKey()
@@ -298,7 +273,7 @@ final class FloatingPanelController: ObservableObject {
         self.shortcodesBanner = nil
         self.toastMessage = nil
 
-        // Record the external app that was frontmost before Kibo's command bar appears
+        // Record the frontmost application before Kibo's command bar steals focus
         let frontApp = NSWorkspace.shared.frontmostApplication
         let myPID = ProcessInfo.processInfo.processIdentifier
         if let front = frontApp, front.processIdentifier != myPID {
@@ -310,6 +285,8 @@ final class FloatingPanelController: ObservableObject {
                 $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != myPID
             })
         }
+
+        updateSearchResults()
 
         if panel == nil {
             let p = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 460))
@@ -349,18 +326,459 @@ final class FloatingPanelController: ObservableObject {
             p.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
+        // Activate Kibo and make the panel key window
         p.orderFrontRegardless()
         NSApp.activate()
         p.makeKeyAndOrderFront(nil)
         p.makeKey()
         isVisible = true
+        focusToken += 1
     }
+
+    func hide() {
+        panel?.orderOut(nil)
+        isVisible = false
+        placeholderPrompt = nil
+        isActionsMenuOpen = false
+        shortcodesBanner = nil
+        toastMessage = nil
+    }
+
+    func toggle(model: AppModel? = nil) {
+        if isVisible {
+            hide()
+        } else if let m = model ?? appModel {
+            show(model: m)
+        }
+    }
+
+    // MARK: - Fast Search & Filter Engine
+
+    func updateSearchResults() {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let usage = EmojiUsageTracker.shared.getCounts()
+        let favs = EmojiUsageTracker.shared.getFavorites()
+        let hid = EmojiUsageTracker.shared.getHidden()
+        let allSnippets: [Snippet] = (try? appModel?.container.mainContext.fetch(FetchDescriptor<Snippet>())) ?? []
+
+        if trimmed.isEmpty {
+            var newSections: [CommandBarSection] = []
+
+            // 1. Suggestions: Favorites + Frequently used
+            var suggestionItems: [CommandBarItem] = []
+
+            // Favorites first
+            let favEmojis = EmojiCatalog.all.filter { favs.contains($0.emoji) && !hid.contains($0.emoji) }
+            suggestionItems.append(contentsOf: favEmojis.map { CommandBarItem.emojiItem($0) })
+
+            // High usage emojis
+            let usedEmojis = EmojiCatalog.all.filter {
+                (usage[$0.emoji] ?? 0) > 0 && !favs.contains($0.emoji) && !hid.contains($0.emoji)
+            }.sorted { (usage[$0.emoji] ?? 0) > (usage[$1.emoji] ?? 0) }
+            suggestionItems.append(contentsOf: usedEmojis.prefix(12).map { CommandBarItem.emojiItem($0) })
+
+            // Frequently used snippets
+            let usedSnippets = allSnippets.filter { $0.usageCount > 0 }.sorted { $0.usageCount > $1.usageCount }
+            suggestionItems.append(contentsOf: usedSnippets.prefix(5).map { CommandBarItem.snippetItem($0) })
+
+            // Fallback essential emojis
+            if suggestionItems.count < 6 {
+                let essentials = ["🔥", "👍", "🙏", "❤️", "😂", "😍", "✨", "🚀", "🎉", "☕", "🍕", "🌹"]
+                for ess in essentials {
+                    if let item = EmojiCatalog.all.first(where: { $0.emoji == ess }),
+                       !suggestionItems.contains(where: { $0.emojiChar == ess }) {
+                        suggestionItems.append(CommandBarItem.emojiItem(item))
+                    }
+                }
+            }
+
+            newSections.append(CommandBarSection(id: "suggestions", title: "Suggestions", items: suggestionItems))
+
+            // 2. All Emojis (Top initial batch for instant 120 FPS rendering)
+            let remaining = EmojiCatalog.all.filter { !hid.contains($0.emoji) }
+            newSections.append(CommandBarSection(
+                id: "all_emojis",
+                title: "All Emojis",
+                items: remaining.prefix(40).map { CommandBarItem.emojiItem($0) }
+            ))
+
+            // 3. User Snippets
+            if !allSnippets.isEmpty {
+                newSections.append(CommandBarSection(
+                    id: "snippets",
+                    title: "Snippets",
+                    items: allSnippets.prefix(10).map { CommandBarItem.snippetItem($0) }
+                ))
+            }
+
+            self.sections = newSections
+            self.flattenedItems = newSections.flatMap(\.items)
+            return
+        }
+
+        // Live Search Mode: Searches entire 1,723+ dataset and snippets
+        let emojiMatches = EmojiCatalog.filter(
+            query: trimmed,
+            usageCounts: usage,
+            favorites: favs,
+            hidden: hid
+        )
+
+        let snippetMatches = SnippetSearch.filter(items: allSnippets, query: trimmed) { s in
+            (name: s.name, alias: s.alias, category: s.category, content: s.content)
+        }
+
+        var newSections: [CommandBarSection] = []
+
+        let cleanQuery = trimmed.lowercased().replacingOccurrences(of: ":", with: "")
+        let isExplicitEmoji = trimmed.hasPrefix(":") ||
+            EmojiCatalog.reverseEngineer(input: trimmed) != nil ||
+            emojiMatches.first?.aliases.contains(where: {
+                let a = $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).lowercased()
+                return a == cleanQuery || a.replacingOccurrences(of: "_", with: "") == cleanQuery
+            }) == true
+
+        if isExplicitEmoji || !emojiMatches.isEmpty {
+            if !emojiMatches.isEmpty {
+                newSections.append(CommandBarSection(
+                    id: "emojis",
+                    title: "Emojis",
+                    items: emojiMatches.prefix(50).map { CommandBarItem.emojiItem($0) }
+                ))
+            }
+            if !snippetMatches.isEmpty {
+                newSections.append(CommandBarSection(
+                    id: "snippets",
+                    title: "Snippets",
+                    items: snippetMatches.prefix(20).map { CommandBarItem.snippetItem($0) }
+                ))
+            }
+        } else {
+            if !snippetMatches.isEmpty {
+                newSections.append(CommandBarSection(
+                    id: "snippets",
+                    title: "Snippets",
+                    items: snippetMatches.prefix(20).map { CommandBarItem.snippetItem($0) }
+                ))
+            }
+            if !emojiMatches.isEmpty {
+                newSections.append(CommandBarSection(
+                    id: "emojis",
+                    title: "Emojis",
+                    items: emojiMatches.prefix(50).map { CommandBarItem.emojiItem($0) }
+                ))
+            }
+        }
+
+        self.sections = newSections
+        self.flattenedItems = newSections.flatMap(\.items)
+    }
+
+    // MARK: - Navigation & Action Handlers
+
+    func moveDown() {
+        if isActionsMenuOpen {
+            let actions = currentActions
+            if actionIndex < actions.count - 1 {
+                actionIndex += 1
+            }
+        } else {
+            if selectedIndex < flattenedItems.count - 1 {
+                selectedIndex += 1
+            }
+        }
+    }
+
+    func moveUp() {
+        if isActionsMenuOpen {
+            if actionIndex > 0 {
+                actionIndex -= 1
+            }
+        } else {
+            if selectedIndex > 0 {
+                selectedIndex -= 1
+            }
+        }
+    }
+
+    func commit() {
+        if isActionsMenuOpen {
+            let actions = currentActions
+            guard actionIndex >= 0 && actionIndex < actions.count else { return }
+            actions[actionIndex].run()
+        } else {
+            selectCurrentItem()
+        }
+    }
+
+    func handleEscape() {
+        if shortcodesBanner != nil {
+            shortcodesBanner = nil
+            return
+        }
+        if isActionsMenuOpen {
+            isActionsMenuOpen = false
+            return
+        }
+        if !query.isEmpty {
+            query = ""
+            selectedIndex = 0
+            return
+        }
+        hide()
+    }
+
+    func toggleActionsMenu() {
+        isActionsMenuOpen.toggle()
+        actionIndex = 0
+        actionQuery = ""
+    }
+
+    var selectedItem: CommandBarItem? {
+        guard selectedIndex >= 0 && selectedIndex < flattenedItems.count else { return nil }
+        return flattenedItems[selectedIndex]
+    }
+
+    func selectCurrentItem() {
+        guard let item = selectedItem else { return }
+
+        switch item.type {
+        case .snippet(let snippet):
+            if SnippetPlaceholders.hasPlaceholders(snippet.content) {
+                showPlaceholderPrompt(snippetName: snippet.name, template: snippet.content)
+            } else {
+                insertText(snippet.content)
+                appModel?.recordSnippetUsage(id: snippet.id)
+                SoundFeedback.playExpansionClick()
+            }
+        case .emoji(let emojiItem):
+            insertText(emojiItem.emoji)
+            EmojiUsageTracker.shared.recordUsage(emoji: emojiItem.emoji)
+            SoundFeedback.playExpansionClick()
+        }
+    }
+
+    func insertText(_ text: String) {
+        hide()
+        let target = targetApp
+        TextInserter.insert(text: text, into: target)
+        query = ""
+        selectedIndex = 0
+    }
+
+    func showToast(_ message: String) {
+        self.toastMessage = message
+        Task {
+            try? await Task.sleep(for: .seconds(2.0))
+            if self.toastMessage == message {
+                self.toastMessage = nil
+            }
+        }
+    }
+
+    // MARK: - Actions Generator for ⌘K Menu
+
+    var currentActions: [ActionItem] {
+        guard let item = selectedItem else { return [] }
+        var list: [ActionItem] = []
+
+        switch item.type {
+        case .emoji(let e):
+            list.append(ActionItem(
+                id: "insert",
+                title: "Insert Emoji",
+                icon: "arrow.turn.down.left",
+                shortcut: "↵"
+            ) { [weak self] in
+                self?.selectCurrentItem()
+            })
+
+            list.append(ActionItem(
+                id: "copy",
+                title: "Copy Emoji to Clipboard",
+                icon: "doc.on.doc",
+                shortcut: "⌘C"
+            ) { [weak self] in
+                guard let self else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(e.emoji, forType: .string)
+                EmojiUsageTracker.shared.recordUsage(emoji: e.emoji)
+                self.showToast("Copied \(e.emoji) to clipboard")
+                self.isActionsMenuOpen = false
+            })
+
+            list.append(ActionItem(
+                id: "copy_shortcode",
+                title: "Copy Shortcode (\(e.primaryAlias))",
+                icon: "number",
+                shortcut: "⌥⌘C"
+            ) { [weak self] in
+                guard let self else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(e.primaryAlias, forType: .string)
+                self.showToast("Copied shortcode \(e.primaryAlias)")
+                self.isActionsMenuOpen = false
+            })
+
+            list.append(ActionItem(
+                id: "show_shortcodes",
+                title: "Show All Shortcodes",
+                icon: "text.bubble",
+                shortcut: "⌘S"
+            ) { [weak self] in
+                guard let self else { return }
+                self.shortcodesBanner = (name: e.name, codes: e.aliases)
+                self.isActionsMenuOpen = false
+            })
+
+            list.append(ActionItem(
+                id: "reset_ranking",
+                title: "Reset Ranking",
+                icon: "arrow.counterclockwise",
+                shortcut: "⌘R"
+            ) { [weak self] in
+                guard let self else { return }
+                EmojiUsageTracker.shared.resetRanking(for: e.emoji)
+                self.updateSearchResults()
+                self.showToast("Reset ranking for \(e.name)")
+                self.isActionsMenuOpen = false
+            })
+
+            let isFav = EmojiUsageTracker.shared.isFavorite(e.emoji)
+            list.append(ActionItem(
+                id: "toggle_fav",
+                title: isFav ? "Remove from Favorites" : "Add to Favorites",
+                icon: isFav ? "star.fill" : "star",
+                shortcut: "⇧⌘F"
+            ) { [weak self] in
+                guard let self else { return }
+                let newFav = EmojiUsageTracker.shared.toggleFavorite(e.emoji)
+                self.updateSearchResults()
+                self.showToast(newFav ? "Added \(e.emoji) to Favorites" : "Removed from Favorites")
+                self.isActionsMenuOpen = false
+            })
+
+            list.append(ActionItem(
+                id: "hide_search",
+                title: "Hide from Search",
+                icon: "eye.slash",
+                shortcut: "⇧⌘H"
+            ) { [weak self] in
+                guard let self else { return }
+                EmojiUsageTracker.shared.toggleHidden(e.emoji)
+                self.updateSearchResults()
+                self.showToast("Hidden \(e.name) from suggestions")
+                self.isActionsMenuOpen = false
+            })
+
+            list.append(ActionItem(
+                id: "copy_hex",
+                title: "Copy Unicode Hex (\(e.unicodeHex))",
+                icon: "curlybraces",
+                shortcut: "⌥⌘U"
+            ) { [weak self] in
+                guard let self else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(e.unicodeHex, forType: .string)
+                self.showToast("Copied \(e.unicodeHex)")
+                self.isActionsMenuOpen = false
+            })
+
+        case .snippet(let s):
+            list.append(ActionItem(
+                id: "insert",
+                title: "Insert Snippet",
+                icon: "arrow.turn.down.left",
+                shortcut: "↵"
+            ) { [weak self] in
+                self?.selectCurrentItem()
+            })
+
+            list.append(ActionItem(
+                id: "copy",
+                title: "Copy Snippet to Clipboard",
+                icon: "doc.on.doc",
+                shortcut: "⌘C"
+            ) { [weak self] in
+                guard let self else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(s.content, forType: .string)
+                self.appModel?.recordSnippetUsage(id: s.id)
+                self.showToast("Copied \"\(s.name)\" to clipboard")
+                self.isActionsMenuOpen = false
+            })
+
+            if !s.alias.isEmpty {
+                list.append(ActionItem(
+                    id: "copy_alias",
+                    title: "Copy Alias (\(s.alias))",
+                    icon: "number",
+                    shortcut: "⌥⌘C"
+                ) { [weak self] in
+                    guard let self else { return }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(s.alias, forType: .string)
+                    self.showToast("Copied alias \(s.alias)")
+                    self.isActionsMenuOpen = false
+                })
+            }
+
+            list.append(ActionItem(
+                id: "reset_ranking",
+                title: "Reset Ranking",
+                icon: "arrow.counterclockwise",
+                shortcut: "⌘R"
+            ) { [weak self] in
+                guard let self else { return }
+                s.usageCount = 0
+                s.lastUsedAt = nil
+                self.updateSearchResults()
+                self.showToast("Reset ranking for \(s.name)")
+                self.isActionsMenuOpen = false
+            })
+
+            list.append(ActionItem(
+                id: "toggle_fav",
+                title: s.isFavourite ? "Remove from Favorites" : "Add to Favorites",
+                icon: s.isFavourite ? "star.fill" : "star",
+                shortcut: "⇧⌘F"
+            ) { [weak self] in
+                guard let self else { return }
+                self.appModel?.toggleFavourite(s)
+                self.updateSearchResults()
+                self.showToast(s.isFavourite ? "Added to Favorites" : "Removed from Favorites")
+                self.isActionsMenuOpen = false
+            })
+
+            list.append(ActionItem(
+                id: "delete",
+                title: "Delete Snippet",
+                icon: "trash",
+                shortcut: "⌘⌫",
+                isDestructive: true
+            ) { [weak self] in
+                guard let self else { return }
+                self.appModel?.deleteSnippet(s)
+                self.updateSearchResults()
+                self.showToast("Deleted snippet \"\(s.name)\"")
+                self.isActionsMenuOpen = false
+            })
+        }
+
+        if !actionQuery.isEmpty {
+            let q = actionQuery.lowercased()
+            return list.filter { $0.title.lowercased().contains(q) }
+        }
+        return list
+    }
+
+    // MARK: - Direct Key Handling Setup
 
     private func setupPanelKeyHandling(panel p: FloatingPanel) {
         p.onKeyDown = { [weak self] event in
             guard let self else { return false }
 
-            // Dynamic Variable Direct-Input mode handling
+            // Variable Direct-Input mode handling
             if let prompt = self.placeholderPrompt {
                 switch event.keyCode {
                 case 53: // Escape
@@ -425,107 +843,90 @@ final class FloatingPanelController: ObservableObject {
 
             // Escape (53): dismiss shortcodes banner, close actions menu, or hide panel
             if event.keyCode == 53 {
-                if self.shortcodesBanner != nil {
-                    self.shortcodesBanner = nil
-                    return true
-                }
-                if self.isActionsMenuOpen {
-                    self.isActionsMenuOpen = false
-                    return true
-                }
-                if !self.query.isEmpty {
-                    self.query = ""
-                    self.selectedIndex = 0
-                    return true
-                }
-                self.hide()
+                self.handleEscape()
                 return true
             }
 
-            // If Actions Menu is open, route navigation and commit to actions
-            if self.isActionsMenuOpen {
-                switch event.keyCode {
-                case 125: // Down Arrow
-                    self.onActionMoveDown?()
-                    return true
-                case 126: // Up Arrow
-                    self.onActionMoveUp?()
-                    return true
-                case 36: // Return
-                    self.onActionCommit?()
-                    return true
-                default:
-                    break
-                }
+            // Down Arrow (125)
+            if event.keyCode == 125 {
+                self.moveDown()
+                return true
+            }
+
+            // Up Arrow (126)
+            if event.keyCode == 126 {
+                self.moveUp()
+                return true
+            }
+
+            // Return (36)
+            if event.keyCode == 36 {
+                self.commit()
+                return true
             }
 
             // Command Shortcuts
             if isCommand {
                 // ⌘C: Copy emoji / snippet
                 if !isShift && !isOption && event.keyCode == 8 {
-                    self.onCopyContent?()
+                    if let item = self.selectedItem {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(item.content, forType: .string)
+                        self.showToast("Copied to clipboard")
+                    }
                     return true
                 }
-                // ⌥⌘C or ⇧⌘C: Copy primary shortcode
-                if (isOption || isShift) && event.keyCode == 8 {
-                    self.onCopyShortcode?()
+                // ⌥⌘C: Copy shortcode
+                if isOption && event.keyCode == 8 {
+                    if let item = self.selectedItem {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(item.primaryCode, forType: .string)
+                        self.showToast("Copied shortcode \(item.primaryCode)")
+                    }
                     return true
                 }
                 // ⇧⌘F: Toggle Favorite
-                if isShift && event.keyCode == 3 { // 'f'
-                    self.onToggleFavorite?()
+                if isShift && event.keyCode == 3 {
+                    if let item = self.selectedItem, let emoji = item.emojiChar {
+                        let isFav = EmojiUsageTracker.shared.toggleFavorite(emoji)
+                        self.updateSearchResults()
+                        self.showToast(isFav ? "Added to Favorites" : "Removed from Favorites")
+                    }
                     return true
                 }
                 // ⌘R: Reset Ranking
-                if !isShift && !isOption && event.keyCode == 15 { // 'r'
-                    self.onResetRanking?()
+                if !isShift && !isOption && event.keyCode == 15 {
+                    if let item = self.selectedItem, let emoji = item.emojiChar {
+                        EmojiUsageTracker.shared.resetRanking(for: emoji)
+                        self.updateSearchResults()
+                        self.showToast("Reset ranking for \(item.title)")
+                    }
                     return true
                 }
                 // ⇧⌘H: Hide from Search
-                if isShift && event.keyCode == 4 { // 'h'
-                    self.onHideItem?()
+                if isShift && event.keyCode == 4 {
+                    if let item = self.selectedItem, let emoji = item.emojiChar {
+                        EmojiUsageTracker.shared.toggleHidden(emoji)
+                        self.updateSearchResults()
+                        self.showToast("Hidden from suggestions")
+                    }
                     return true
                 }
-                // ⌘S or ⌘I: Show all shortcodes
-                if !isShift && !isOption && (event.keyCode == 1 || event.keyCode == 34) { // 's' or 'i'
-                    self.onShowShortcodes?()
+                // ⌘S: Show all shortcodes
+                if !isShift && !isOption && event.keyCode == 1 {
+                    if let item = self.selectedItem {
+                        self.shortcodesBanner = (name: item.title, codes: item.allShortcodes)
+                    }
                     return true
                 }
             }
 
-            // Standard List Navigation
-            switch event.keyCode {
-            case 125: // Down Arrow
-                self.onMoveDown?()
-                return true
-            case 126: // Up Arrow
-                self.onMoveUp?()
-                return true
-            case 36: // Return
-                self.onCommit?()
-                return true
-            default:
-                // Text input is passed to the focused search field!
-                return false
-            }
+            // All other keystrokes (text input, typing, delete, spaces) route to the focused TextField
+            return false
         }
     }
 
-    func toggleActionsMenu() {
-        isActionsMenuOpen.toggle()
-        actionIndex = 0
-        actionQuery = ""
-    }
-
-    func showToast(_ message: String) {
-        self.toastMessage = message
-        Task {
-            try? await Task.sleep(for: .seconds(2.0))
-            if self.toastMessage == message {
-                self.toastMessage = nil
-            }
-        }
-    }
+    // MARK: - Snippet Dynamic Variable HUD
 
     func showPlaceholderPrompt(snippetName: String, template: String, backspacesToErase: Int = 0) {
         guard let model = appModel else { return }
@@ -546,78 +947,6 @@ final class FloatingPanelController: ObservableObject {
         TextInserter.insert(text: substituted, into: target, backspaces: backspaces)
         SoundFeedback.playExpansionClick()
     }
-
-    func hide() {
-        panel?.orderOut(nil)
-        isVisible = false
-        placeholderPrompt = nil
-        isActionsMenuOpen = false
-        shortcodesBanner = nil
-        toastMessage = nil
-    }
-
-    func toggle(model: AppModel? = nil) {
-        if isVisible {
-            hide()
-        } else if let m = model ?? appModel {
-            show(model: m)
-        }
-    }
-}
-
-// MARK: - Search Result Item
-
-enum SearchListItem: Identifiable, Equatable {
-    case emoji(EmojiItem)
-    case snippet(Snippet)
-
-    var id: String {
-        switch self {
-        case .emoji(let e): return "e_\(e.id)"
-        case .snippet(let s): return "s_\(s.id)"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .emoji(let e): return e.name
-        case .snippet(let s): return s.name
-        }
-    }
-
-    var category: String {
-        switch self {
-        case .emoji(let e): return e.category
-        case .snippet(let s): return s.category.isEmpty ? "Snippet" : s.category
-        }
-    }
-
-    var primaryCode: String {
-        switch self {
-        case .emoji(let e): return e.primaryAlias
-        case .snippet(let s): return s.alias.isEmpty ? "Snippet" : s.alias
-        }
-    }
-
-    var emojiChar: String? {
-        switch self {
-        case .emoji(let e): return e.emoji
-        case .snippet: return nil
-        }
-    }
-
-    var allShortcodes: [String] {
-        switch self {
-        case .emoji(let e): return e.aliases
-        case .snippet(let s): return [s.alias].filter { !$0.isEmpty }
-        }
-    }
-}
-
-struct SearchSection: Identifiable {
-    let id: String
-    let title: String
-    let items: [SearchListItem]
 }
 
 // MARK: - Floating Search Panel SwiftUI Content
@@ -625,116 +954,11 @@ struct SearchSection: Identifiable {
 struct FloatingSearchPanelContent: View {
     @ObservedObject var controller: FloatingPanelController
     @Environment(AppModel.self) private var model
-
-    @Query(sort: \Snippet.usageCount, order: .reverse) private var allSnippets: [Snippet]
-
-    @State private var favs: Set<String> = []
-    @State private var hid: Set<String> = []
-    @State private var usage: [String: Int] = [:]
-
-    private var matchingSnippets: [Snippet] {
-        SnippetSearch.filter(items: allSnippets, query: controller.query) {
-            ($0.name, $0.alias, $0.category, $0.content)
-        }
-    }
-
-    private var sections: [SearchSection] {
-        let trimmed = controller.query.trimmingCharacters(in: .whitespaces)
-
-        if trimmed.isEmpty {
-            var res: [SearchSection] = []
-
-            // Suggestions: favorites, top used, frequently used snippets, essential fallbacks
-            var suggestionItems: [SearchListItem] = []
-
-            // 1. User favorites
-            let favEmojis = EmojiCatalog.all.filter { favs.contains($0.emoji) && !hid.contains($0.emoji) }
-            suggestionItems.append(contentsOf: favEmojis.map { .emoji($0) })
-
-            // 2. High usage emojis
-            let usedEmojis = EmojiCatalog.all.filter {
-                (usage[$0.emoji] ?? 0) > 0 && !favs.contains($0.emoji) && !hid.contains($0.emoji)
-            }.sorted { (usage[$0.emoji] ?? 0) > (usage[$1.emoji] ?? 0) }
-            suggestionItems.append(contentsOf: usedEmojis.prefix(12).map { .emoji($0) })
-
-            // 3. High usage snippets
-            let usedSnippets = allSnippets.filter { $0.usageCount > 0 }
-                .sorted { $0.usageCount > $1.usageCount }
-            suggestionItems.append(contentsOf: usedSnippets.prefix(5).map { .snippet($0) })
-
-            // Fallback: popular essentials
-            if suggestionItems.count < 6 {
-                let essentials = ["🔥", "👍", "🙏", "❤️", "😂", "😍", "✨", "🚀", "🎉", "☕", "🍕", "🌹"]
-                for ess in essentials {
-                    if let item = EmojiCatalog.all.first(where: { $0.emoji == ess }),
-                       !suggestionItems.contains(where: { $0.id == "e_\(item.id)" }) {
-                        suggestionItems.append(.emoji(item))
-                    }
-                }
-            }
-
-            res.append(SearchSection(id: "suggestions", title: "Suggestions", items: suggestionItems))
-
-            // All Emojis (Full 1,723 dataset!)
-            let remainingEmojis = EmojiCatalog.all.filter { !hid.contains($0.emoji) }
-            res.append(SearchSection(id: "all_emojis", title: "All Emojis", items: remainingEmojis.map { .emoji($0) }))
-
-            // Snippets
-            if !allSnippets.isEmpty {
-                res.append(SearchSection(id: "snippets", title: "Snippets", items: allSnippets.map { .snippet($0) }))
-            }
-
-            return res
-        }
-
-        // Search Mode: ALL emojis and snippets searched
-        let emojiMatches = EmojiCatalog.filter(
-            query: trimmed,
-            usageCounts: usage,
-            favorites: favs,
-            hidden: hid
-        )
-        let snippetMatches = matchingSnippets
-
-        var res: [SearchSection] = []
-
-        let cleanQuery = trimmed.lowercased().replacingOccurrences(of: ":", with: "")
-        let isExplicitEmoji = trimmed.hasPrefix(":") ||
-            EmojiCatalog.reverseEngineer(input: trimmed) != nil ||
-            emojiMatches.first?.aliases.contains(where: {
-                let a = $0.trimmingCharacters(in: CharacterSet(charactersIn: ":")).lowercased()
-                return a == cleanQuery || a.replacingOccurrences(of: "_", with: "") == cleanQuery
-            }) == true
-
-        if isExplicitEmoji || !emojiMatches.isEmpty {
-            res.append(SearchSection(id: "emojis", title: "Emojis", items: emojiMatches.map { .emoji($0) }))
-            if !snippetMatches.isEmpty {
-                res.append(SearchSection(id: "snippets", title: "Snippets", items: snippetMatches.map { .snippet($0) }))
-            }
-        } else {
-            if !snippetMatches.isEmpty {
-                res.append(SearchSection(id: "snippets", title: "Snippets", items: snippetMatches.map { .snippet($0) }))
-            }
-            if !emojiMatches.isEmpty {
-                res.append(SearchSection(id: "emojis", title: "Emojis", items: emojiMatches.map { .emoji($0) }))
-            }
-        }
-
-        return res
-    }
-
-    private var flattenedItems: [SearchListItem] {
-        sections.flatMap(\.items)
-    }
-
-    private var currentSelectedItem: SearchListItem? {
-        guard controller.selectedIndex >= 0 && controller.selectedIndex < flattenedItems.count else { return nil }
-        return flattenedItems[controller.selectedIndex]
-    }
+    @FocusState private var isSearchFocused: Bool
 
     private var primaryActionTitle: String {
-        guard let item = currentSelectedItem else { return "Insert" }
-        switch item {
+        guard let item = controller.selectedItem else { return "Insert" }
+        switch item.type {
         case .emoji: return "Insert Emoji"
         case .snippet: return "Insert Snippet"
         }
@@ -746,18 +970,21 @@ struct FloatingSearchPanelContent: View {
                 // Dynamic Variable Direct-Input Mode
                 PlaceholderPromptHUDView(prompt: prompt, controller: controller)
             } else {
-                // Search Header
+                // Search Header (Image 1)
                 HStack(spacing: Space.sm) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 19, weight: .medium))
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(Color.white.opacity(0.8))
 
-                    CommandSearchBar(
+                    TextField(
+                        "",
                         text: $controller.query,
-                        placeholder: "Search for emojis and snippets...",
-                        onCommit: { selectCurrent() },
-                        onEscape: { controller.hide() }
+                        prompt: Text("Search for emojis and snippets...").foregroundColor(Color.white.opacity(0.38))
                     )
+                    .font(.system(size: 18, weight: .regular))
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(.white)
+                    .focused($isSearchFocused)
                     .frame(maxWidth: .infinity)
                     .frame(height: 28)
 
@@ -778,7 +1005,7 @@ struct FloatingSearchPanelContent: View {
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundStyle(Color.white.opacity(0.7))
                             .padding(.horizontal, Space.sm)
-                            .padding(.vertical, 2)
+                            .padding(.vertical, 2) // grid: ok badge
                             .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
                     }
                 }
@@ -786,7 +1013,7 @@ struct FloatingSearchPanelContent: View {
                 .frame(height: 56)
                 .background(Color(red: 0.14, green: 0.15, blue: 0.18))
                 .overlay(
-                    Rectangle().fill(Color.white.opacity(0.10)).frame(height: 1),
+                    Rectangle().fill(Color.white.opacity(0.10)).frame(height: 1), // grid: ok border
                     alignment: .bottom
                 )
 
@@ -795,7 +1022,7 @@ struct FloatingSearchPanelContent: View {
                     HStack(spacing: Space.sm) {
                         Image(systemName: "info.circle.fill")
                             .foregroundStyle(Color(red: 0.45, green: 0.75, blue: 1.0))
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 1) { // grid: ok label
                             Text("All Shortcodes for \(banner.name)")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(.white)
@@ -824,34 +1051,34 @@ struct FloatingSearchPanelContent: View {
                     .padding(.horizontal, Space.lg)
                     .padding(.vertical, Space.xs)
                     .background(Color(red: 0.16, green: 0.20, blue: 0.26))
-                    .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .bottom)
+                    .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .bottom) // grid: ok border
                 }
 
                 // Results List
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: Space.xs) {
-                            ForEach(sections) { section in
+                            ForEach(controller.sections) { section in
                                 if !section.items.isEmpty {
                                     Text(section.title)
                                         .font(.system(size: 11, weight: .semibold))
                                         .foregroundStyle(Color.white.opacity(0.42))
                                         .padding(.horizontal, Space.lg)
                                         .padding(.top, Space.sm)
-                                        .padding(.bottom, 2)
+                                        .padding(.bottom, 2) // grid: ok label spacing
 
                                     ForEach(section.items) { item in
-                                        let index = flattenedItems.firstIndex(of: item) ?? 0
+                                        let index = controller.flattenedItems.firstIndex(where: { $0.id == item.id }) ?? 0
                                         FloatingRowView(
                                             item: item,
                                             isSelected: index == controller.selectedIndex,
-                                            isFavorite: favs.contains(item.emojiChar ?? ""),
-                                            usageCount: usage[item.emojiChar ?? ""] ?? 0
+                                            isFavorite: EmojiUsageTracker.shared.isFavorite(item.emojiChar ?? ""),
+                                            usageCount: EmojiUsageTracker.shared.usageCount(for: item.emojiChar ?? "")
                                         )
                                         .id(index)
                                         .onTapGesture {
                                             controller.selectedIndex = index
-                                            selectCurrent()
+                                            controller.commit()
                                         }
                                     }
                                 }
@@ -867,7 +1094,7 @@ struct FloatingSearchPanelContent: View {
                     }
                 }
                 .overlay {
-                    if flattenedItems.isEmpty {
+                    if controller.flattenedItems.isEmpty {
                         VStack(spacing: Space.xs) {
                             Text("No results")
                                 .font(.headline)
@@ -892,12 +1119,12 @@ struct FloatingSearchPanelContent: View {
                     .padding(.horizontal, Space.md)
                     .padding(.vertical, Space.sm)
                     .background(Color(red: 0.15, green: 0.17, blue: 0.22), in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
-                    .shadow(radius: 6) // grid: ok shadow
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 1)) // grid: ok border
+                    .shadow(radius: 8)
                     .padding(.bottom, Space.xs)
                 }
 
-                // High Contrast Command Bar Footer
+                // High Contrast Command Bar Footer (Image 1)
                 HStack(spacing: Space.sm) {
                     Button {
                         controller.toggleActionsMenu()
@@ -911,7 +1138,7 @@ struct FloatingSearchPanelContent: View {
                     .buttonStyle(.plain)
                     .help("Actions (⌘K)")
 
-                    Text("\(flattenedItems.count) \(flattenedItems.count == 1 ? "item" : "items")")
+                    Text("\(controller.flattenedItems.count) \(controller.flattenedItems.count == 1 ? "item" : "items")")
                         .font(.caption2)
                         .foregroundStyle(Color.white.opacity(0.45))
 
@@ -920,7 +1147,7 @@ struct FloatingSearchPanelContent: View {
                     // Unified Action Pill Container (Raycast / Spotlight Reference)
                     HStack(spacing: 0) {
                         Button {
-                            selectCurrent()
+                            controller.commit()
                         } label: {
                             HStack(spacing: Space.xs) {
                                 Text(primaryActionTitle)
@@ -929,7 +1156,7 @@ struct FloatingSearchPanelContent: View {
                                 Text("↵")
                                     .font(.system(size: 10, weight: .bold))
                                     .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
+                                    .padding(.vertical, 1) // grid: ok keycap
                                     .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
                                     .foregroundStyle(.white)
                             }
@@ -940,7 +1167,7 @@ struct FloatingSearchPanelContent: View {
 
                         Rectangle()
                             .fill(Color.white.opacity(0.18))
-                            .frame(width: 1, height: 16)
+                            .frame(width: 1, height: 16) // grid: ok divider
 
                         Button {
                             controller.toggleActionsMenu()
@@ -949,14 +1176,14 @@ struct FloatingSearchPanelContent: View {
                                 Text("Actions")
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(Color.white.opacity(0.85))
-                                HStack(spacing: 1) {
+                                HStack(spacing: 1) { // grid: ok keycap
                                     Text("⌘")
                                         .font(.system(size: 9, weight: .bold))
                                     Text("K")
                                         .font(.system(size: 9, weight: .bold))
                                 }
                                 .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
+                                .padding(.vertical, 1) // grid: ok keycap
                                 .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
                                 .foregroundStyle(.white)
                             }
@@ -968,14 +1195,14 @@ struct FloatingSearchPanelContent: View {
                     .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 1) // grid: ok border
                     )
                 }
                 .padding(.horizontal, Space.lg)
                 .frame(height: 36)
                 .background(Color(red: 0.08, green: 0.09, blue: 0.11))
                 .overlay(
-                    Rectangle().fill(Color.white.opacity(0.10)).frame(height: 1),
+                    Rectangle().fill(Color.white.opacity(0.10)).frame(height: 1), // grid: ok border
                     alignment: .top
                 )
             }
@@ -985,15 +1212,15 @@ struct FloatingSearchPanelContent: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
+                .strokeBorder(Color.white.opacity(0.16), lineWidth: 1) // grid: ok border
         )
         // ⌘K Actions Menu Overlay (Image 2)
         .overlay(alignment: .bottomTrailing) {
-            if controller.isActionsMenuOpen, let item = currentSelectedItem {
+            if controller.isActionsMenuOpen, let item = controller.selectedItem {
                 ActionsMenuOverlay(
                     controller: controller,
                     selectedItem: item,
-                    actions: currentActions(for: item)
+                    actions: controller.currentActions
                 )
                 .padding(.trailing, Space.md)
                 .padding(.bottom, 44)
@@ -1004,326 +1231,18 @@ struct FloatingSearchPanelContent: View {
             }
         }
         .onAppear {
-            refreshMetadata()
-            setupCallbacks()
+            isSearchFocused = true
         }
-        .onChange(of: controller.query) { _, _ in
-            controller.selectedIndex = 0
+        .onChange(of: controller.focusToken) { _, _ in
+            isSearchFocused = true
         }
-        .onChange(of: flattenedItems.count) { _, newCount in
-            if controller.selectedIndex >= newCount {
-                controller.selectedIndex = max(0, newCount - 1)
-            }
-        }
-    }
-
-    private func refreshMetadata() {
-        usage = EmojiUsageTracker.shared.getCounts()
-        favs = EmojiUsageTracker.shared.getFavorites()
-        hid = EmojiUsageTracker.shared.getHidden()
-    }
-
-    private func setupCallbacks() {
-        controller.onCommit = { selectCurrent() }
-        controller.onMoveDown = {
-            if controller.selectedIndex < flattenedItems.count - 1 {
-                controller.selectedIndex += 1
-            }
-        }
-        controller.onMoveUp = {
-            if controller.selectedIndex > 0 {
-                controller.selectedIndex -= 1
-            }
-        }
-        controller.onCopyContent = { copyCurrentContent() }
-        controller.onCopyShortcode = { copyCurrentShortcode() }
-        controller.onToggleFavorite = { toggleCurrentFavorite() }
-        controller.onResetRanking = { resetCurrentRanking() }
-        controller.onHideItem = { hideCurrentItem() }
-        controller.onShowShortcodes = { showCurrentShortcodes() }
-
-        controller.onActionMoveDown = {
-            guard let item = currentSelectedItem else { return }
-            let actions = currentActions(for: item)
-            if controller.actionIndex < actions.count - 1 {
-                controller.actionIndex += 1
-            }
-        }
-        controller.onActionMoveUp = {
-            if controller.actionIndex > 0 {
-                controller.actionIndex -= 1
-            }
-        }
-        controller.onActionCommit = {
-            guard let item = currentSelectedItem else { return }
-            let actions = currentActions(for: item)
-            guard controller.actionIndex >= 0 && controller.actionIndex < actions.count else { return }
-            actions[controller.actionIndex].run()
-        }
-    }
-
-    private func selectCurrent() {
-        guard let item = currentSelectedItem else { return }
-
-        switch item {
-        case .snippet(let snippet):
-            if SnippetPlaceholders.hasPlaceholders(snippet.content) {
-                controller.placeholderPrompt = PlaceholderPromptState(
-                    snippetName: snippet.name,
-                    template: snippet.content,
-                    backspaces: 0
-                )
-            } else {
-                insertText(snippet.content)
-                model.recordSnippetUsage(id: snippet.id)
-                SoundFeedback.playExpansionClick()
-            }
-        case .emoji(let emojiItem):
-            insertText(emojiItem.emoji)
-            EmojiUsageTracker.shared.recordUsage(emoji: emojiItem.emoji)
-            refreshMetadata()
-            SoundFeedback.playExpansionClick()
-        }
-    }
-
-    private func insertText(_ text: String) {
-        controller.hide()
-        let target = controller.targetApp
-        TextInserter.insert(text: text, into: target)
-        controller.query = ""
-        controller.selectedIndex = 0
-    }
-
-    private func copyCurrentContent() {
-        guard let item = currentSelectedItem else { return }
-        switch item {
-        case .emoji(let e):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(e.emoji, forType: .string)
-            EmojiUsageTracker.shared.recordUsage(emoji: e.emoji)
-            refreshMetadata()
-            controller.showToast("Copied \(e.emoji) to clipboard")
-        case .snippet(let s):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(s.content, forType: .string)
-            model.recordSnippetUsage(id: s.id)
-            controller.showToast("Copied \"\(s.name)\" to clipboard")
-        }
-    }
-
-    private func copyCurrentShortcode() {
-        guard let item = currentSelectedItem else { return }
-        let code = item.primaryCode
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(code, forType: .string)
-        controller.showToast("Copied shortcode \(code)")
-    }
-
-    private func toggleCurrentFavorite() {
-        guard let item = currentSelectedItem else { return }
-        switch item {
-        case .emoji(let e):
-            let isFav = EmojiUsageTracker.shared.toggleFavorite(e.emoji)
-            refreshMetadata()
-            controller.showToast(isFav ? "Added \(e.emoji) to Favorites" : "Removed \(e.emoji) from Favorites")
-        case .snippet(let s):
-            model.toggleFavourite(s)
-            controller.showToast(s.isFavourite ? "Added \"\(s.name)\" to Favorites" : "Removed from Favorites")
-        }
-    }
-
-    private func resetCurrentRanking() {
-        guard let item = currentSelectedItem else { return }
-        switch item {
-        case .emoji(let e):
-            EmojiUsageTracker.shared.resetRanking(for: e.emoji)
-            refreshMetadata()
-            controller.showToast("Reset ranking for \(e.name)")
-        case .snippet(let s):
-            s.usageCount = 0
-            s.lastUsedAt = nil
-            controller.showToast("Reset ranking for \(s.name)")
-        }
-    }
-
-    private func hideCurrentItem() {
-        guard let item = currentSelectedItem else { return }
-        switch item {
-        case .emoji(let e):
-            EmojiUsageTracker.shared.toggleHidden(e.emoji)
-            refreshMetadata()
-            controller.showToast("Hidden \(e.name) from suggestions")
-        case .snippet(let s):
-            model.deleteSnippet(s)
-            controller.showToast("Deleted snippet \"\(s.name)\"")
-        }
-    }
-
-    private func showCurrentShortcodes() {
-        guard let item = currentSelectedItem else { return }
-        controller.shortcodesBanner = (name: item.title, codes: item.allShortcodes)
-    }
-
-    private func currentActions(for item: SearchListItem) -> [ActionItem] {
-        var actions: [ActionItem] = []
-
-        switch item {
-        case .emoji(let e):
-            actions.append(ActionItem(
-                id: "insert",
-                title: "Insert Emoji",
-                icon: "arrow.turn.down.left",
-                shortcut: "↵"
-            ) {
-                selectCurrent()
-            })
-
-            actions.append(ActionItem(
-                id: "copy",
-                title: "Copy Emoji to Clipboard",
-                icon: "doc.on.doc",
-                shortcut: "⌘C"
-            ) {
-                copyCurrentContent()
-            })
-
-            actions.append(ActionItem(
-                id: "copy_shortcode",
-                title: "Copy Shortcode (\(e.primaryAlias))",
-                icon: "number",
-                shortcut: "⌥⌘C"
-            ) {
-                copyCurrentShortcode()
-            })
-
-            actions.append(ActionItem(
-                id: "show_shortcodes",
-                title: "Show All Shortcodes",
-                icon: "text.bubble",
-                shortcut: "⌘S"
-            ) {
-                showCurrentShortcodes()
-                controller.isActionsMenuOpen = false
-            })
-
-            actions.append(ActionItem(
-                id: "reset_ranking",
-                title: "Reset Ranking",
-                icon: "arrow.counterclockwise",
-                shortcut: "⌘R"
-            ) {
-                resetCurrentRanking()
-                controller.isActionsMenuOpen = false
-            })
-
-            let isFav = favs.contains(e.emoji)
-            actions.append(ActionItem(
-                id: "toggle_fav",
-                title: isFav ? "Remove from Favorites" : "Add to Favorites",
-                icon: isFav ? "star.fill" : "star",
-                shortcut: "⇧⌘F"
-            ) {
-                toggleCurrentFavorite()
-                controller.isActionsMenuOpen = false
-            })
-
-            actions.append(ActionItem(
-                id: "hide_search",
-                title: "Hide from Search",
-                icon: "eye.slash",
-                shortcut: "⇧⌘H"
-            ) {
-                hideCurrentItem()
-                controller.isActionsMenuOpen = false
-            })
-
-            actions.append(ActionItem(
-                id: "copy_hex",
-                title: "Copy Unicode Hex (\(e.unicodeHex))",
-                icon: "curlybraces",
-                shortcut: "⌥⌘U"
-            ) {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(e.unicodeHex, forType: .string)
-                controller.showToast("Copied \(e.unicodeHex)")
-                controller.isActionsMenuOpen = false
-            })
-
-        case .snippet(let s):
-            actions.append(ActionItem(
-                id: "insert",
-                title: "Insert Snippet",
-                icon: "arrow.turn.down.left",
-                shortcut: "↵"
-            ) {
-                selectCurrent()
-            })
-
-            actions.append(ActionItem(
-                id: "copy",
-                title: "Copy Snippet to Clipboard",
-                icon: "doc.on.doc",
-                shortcut: "⌘C"
-            ) {
-                copyCurrentContent()
-            })
-
-            if !s.alias.isEmpty {
-                actions.append(ActionItem(
-                    id: "copy_alias",
-                    title: "Copy Alias (\(s.alias))",
-                    icon: "number",
-                    shortcut: "⌥⌘C"
-                ) {
-                    copyCurrentShortcode()
-                })
-            }
-
-            actions.append(ActionItem(
-                id: "reset_ranking",
-                title: "Reset Ranking",
-                icon: "arrow.counterclockwise",
-                shortcut: "⌘R"
-            ) {
-                resetCurrentRanking()
-                controller.isActionsMenuOpen = false
-            })
-
-            actions.append(ActionItem(
-                id: "toggle_fav",
-                title: s.isFavourite ? "Remove from Favorites" : "Add to Favorites",
-                icon: s.isFavourite ? "star.fill" : "star",
-                shortcut: "⇧⌘F"
-            ) {
-                toggleCurrentFavorite()
-                controller.isActionsMenuOpen = false
-            })
-
-            actions.append(ActionItem(
-                id: "delete",
-                title: "Delete Snippet",
-                icon: "trash",
-                shortcut: "⌘⌫",
-                isDestructive: true
-            ) {
-                hideCurrentItem()
-                controller.isActionsMenuOpen = false
-            })
-        }
-
-        if !controller.actionQuery.isEmpty {
-            let q = controller.actionQuery.lowercased()
-            return actions.filter { $0.title.lowercased().contains(q) }
-        }
-
-        return actions
     }
 }
 
 // MARK: - Row View (Matches Reference Screenshot Image 1)
 
 private struct FloatingRowView: View {
-    let item: SearchListItem
+    let item: CommandBarItem
     let isSelected: Bool
     let isFavorite: Bool
     let usageCount: Int
@@ -1332,7 +1251,7 @@ private struct FloatingRowView: View {
         HStack(spacing: Space.md) {
             // Left Icon + Indicator Dot
             ZStack(alignment: .bottomTrailing) {
-                switch item {
+                switch item.type {
                 case .emoji(let e):
                     Text(e.emoji)
                         .font(.system(size: 24))
@@ -1367,7 +1286,7 @@ private struct FloatingRowView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Color.white.opacity(0.85))
                 .padding(.horizontal, Space.sm)
-                .padding(.vertical, 2)
+                .padding(.vertical, 2) // grid: ok capsule padding
                 .background(
                     isSelected ? Color.white.opacity(0.20) : Color.white.opacity(0.10),
                     in: Capsule()
@@ -1389,7 +1308,7 @@ private struct FloatingRowView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(isSelected ? Color.white.opacity(0.18) : Color.clear, lineWidth: 1)
+                .strokeBorder(isSelected ? Color.white.opacity(0.18) : Color.clear, lineWidth: 1) // grid: ok border
         )
         .contentShape(Rectangle())
     }
@@ -1399,7 +1318,7 @@ private struct FloatingRowView: View {
 
 private struct ActionsMenuOverlay: View {
     @ObservedObject var controller: FloatingPanelController
-    let selectedItem: SearchListItem
+    let selectedItem: CommandBarItem
     let actions: [ActionItem]
 
     var body: some View {
@@ -1415,7 +1334,7 @@ private struct ActionsMenuOverlay: View {
                     controller.isActionsMenuOpen = false
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 10, weight: .bold)) // grid: ok symbol
                         .foregroundStyle(Color.white.opacity(0.5))
                 }
                 .buttonStyle(.plain)
@@ -1428,7 +1347,7 @@ private struct ActionsMenuOverlay: View {
                 .overlay(Color.white.opacity(0.12))
 
             // Actions List
-            VStack(spacing: 2) {
+            VStack(spacing: 2) { // grid: ok list spacing
                 ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
                     let isSelected = index == controller.actionIndex
                     HStack(spacing: Space.sm) {
@@ -1448,7 +1367,7 @@ private struct ActionsMenuOverlay: View {
                             Text(action.shortcut)
                                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                                 .padding(.horizontal, Space.xs)
-                                .padding(.vertical, 2)
+                                .padding(.vertical, 2) // grid: ok keycap
                                 .background(Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
                                 .foregroundStyle(Color.white.opacity(0.85))
                         }
@@ -1475,10 +1394,14 @@ private struct ActionsMenuOverlay: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12))
                     .foregroundStyle(Color.white.opacity(0.4))
-                TextField("Search for actions...", text: $controller.actionQuery)
-                    .font(.system(size: 12))
-                    .textFieldStyle(.plain)
-                    .foregroundStyle(.white)
+                TextField(
+                    "",
+                    text: $controller.actionQuery,
+                    prompt: Text("Search for actions...").foregroundColor(Color.white.opacity(0.35))
+                )
+                .font(.system(size: 12))
+                .textFieldStyle(.plain)
+                .foregroundStyle(.white)
             }
             .padding(.horizontal, Space.md)
             .padding(.vertical, Space.sm)
@@ -1489,7 +1412,7 @@ private struct ActionsMenuOverlay: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1) // grid: ok border
         )
         .shadow(color: Color.black.opacity(0.5), radius: 16, x: 0, y: 8)
     }
@@ -1548,15 +1471,11 @@ private struct PlaceholderPromptHUDView: View {
             .padding(.horizontal, Space.lg)
             .frame(height: 56)
             .background(Color(red: 0.14, green: 0.15, blue: 0.18))
-            .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .bottom)
+            .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .bottom) // grid: ok border
 
-            // Variables List & Live Inputs
+            // Variables List
             ScrollView {
-                VStack(alignment: .leading, spacing: Space.md) {
-                    Text("VARIABLES")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(Color.white.opacity(0.5))
-
+                VStack(spacing: Space.md) {
                     VStack(spacing: Space.sm) {
                         ForEach(Array(prompt.placeholders.enumerated()), id: \.element.id) { index, p in
                             let isActive = index == prompt.activeIndex
@@ -1594,7 +1513,7 @@ private struct PlaceholderPromptHUDView: View {
                                     RoundedRectangle(cornerRadius: 8)
                                         .strokeBorder(
                                             isActive ? Color(red: 0.18, green: 0.82, blue: 0.44) : Color.white.opacity(0.1),
-                                            lineWidth: isActive ? 2 : 1
+                                            lineWidth: isActive ? 2 : 1 // grid: ok border
                                         )
                                 )
                             }
@@ -1618,7 +1537,7 @@ private struct PlaceholderPromptHUDView: View {
                             .padding(Space.md)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color(red: 0.08, green: 0.09, blue: 0.11), in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.12), lineWidth: 1)) // grid: ok border
                     }
                 }
                 .padding(Space.lg)
@@ -1651,7 +1570,7 @@ private struct PlaceholderPromptHUDView: View {
             .padding(.horizontal, Space.lg)
             .frame(height: 40)
             .background(Color(red: 0.08, green: 0.09, blue: 0.11))
-            .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .top)
+            .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .top) // grid: ok border
         }
     }
 }

@@ -232,11 +232,25 @@ enum SelfTest {
             check("filter excludes hidden 💀", !afterHidden.contains(where: { $0.emoji == "💀" }))
             EmojiUsageTracker.shared.toggleHidden("💀") // restore
 
-            // Actions Menu toggling
+            // Controller Live Typing and Navigation Tests
+            controller.query = "cat"
+            check("controller live search updates items for 'cat'", controller.flattenedItems.contains(where: { $0.emojiChar == "🐱" || $0.emojiChar == "🐈" }))
+            check("controller selectedIndex starts at 0", controller.selectedIndex == 0)
+            controller.moveDown()
+            check("controller moveDown increments selectedIndex to 1", controller.selectedIndex == 1)
+            controller.moveUp()
+            check("controller moveUp decrements selectedIndex to 0", controller.selectedIndex == 0)
+
+            controller.query = "coffee"
+            check("controller live search for 'coffee' ranks ☕ first", controller.flattenedItems.first?.emojiChar == "☕")
+
+            // Actions Menu toggling and action navigation
             controller.toggleActionsMenu()
             check("toggleActionsMenu opens actions menu", controller.isActionsMenuOpen)
-            controller.toggleActionsMenu()
-            check("toggleActionsMenu closes actions menu", !controller.isActionsMenuOpen)
+            controller.moveDown()
+            check("moveDown in actions menu increments actionIndex to 1", controller.actionIndex == 1)
+            controller.handleEscape()
+            check("handleEscape closes actions menu", !controller.isActionsMenuOpen)
 
             controller.hide()
             check("command bar is hidden after hide", !controller.isVisible)
