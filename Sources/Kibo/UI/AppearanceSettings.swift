@@ -1,11 +1,44 @@
 import SwiftUI
 
-/// Settings > Appearance: the accent color. Light and dark mode follow the Mac.
+/// Settings > Appearance: theme mode, menu bar icon style, and accent color.
 struct AppearanceSettings: View {
     @Bindable private var store = ThemeStore.shared
+    @AppStorage("appearance.menuBarIconStyle") private var menuBarIconStyleRaw = MenuBarIconStyle.color.rawValue
 
     var body: some View {
-        Section {
+        Section("Theme") {
+            Picker("Appearance", selection: Binding(
+                get: { store.appearanceMode },
+                set: { store.appearanceMode = $0 }
+            )) {
+                ForEach(AppearanceMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("Select Light or Dark mode, or choose System to follow your macOS settings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Menu Bar Icon") {
+            Picker("Icon style", selection: Binding(
+                get: { MenuBarIconStyle(rawValue: menuBarIconStyleRaw) ?? .color },
+                set: { menuBarIconStyleRaw = $0.rawValue }
+            )) {
+                ForEach(MenuBarIconStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("Choose Full Color for the Liquid Glass app icon, or Monochrome for a black and white icon that matches standard macOS menu bar icons.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Accent Color") {
             AccentPreview()
                 .padding(.vertical, Space.xs)
             LabeledContent("Accent color") {

@@ -68,11 +68,11 @@ struct CommandBarSearchField: NSViewRepresentable {
         tf.drawsBackground = false
         tf.focusRingType = .none
         tf.font = .systemFont(ofSize: 18, weight: .regular)
-        tf.textColor = .white
+        tf.textColor = .labelColor
         tf.placeholderAttributedString = NSAttributedString(
             string: "Search for emojis and snippets...",
             attributes: [
-                .foregroundColor: NSColor.white.withAlphaComponent(0.38),
+                .foregroundColor: NSColor.secondaryLabelColor,
                 .font: NSFont.systemFont(ofSize: 18, weight: .regular)
             ]
         )
@@ -889,9 +889,9 @@ struct FloatingSearchPanelContent: View {
             }
         }
         .frame(width: 640, height: 460)
-        .background(Color(red: 0.11, green: 0.12, blue: 0.14))
+        .background(Color(light: 0xF6F6F8, dark: 0x1C1D24))
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.16), lineWidth: 1)) // grid: ok border
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)) // grid: ok border
         .overlay(alignment: .bottomTrailing) {
             if controller.isActionsMenuOpen, let row = controller.selectedRow {
                 ActionsMenuOverlay(controller: controller, row: row, actions: controller.currentActions)
@@ -910,7 +910,7 @@ struct FloatingSearchPanelContent: View {
         HStack(spacing: Space.sm) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.8))
+                .foregroundStyle(Color.primary.opacity(0.7))
 
             CommandBarSearchField(controller: controller)
                 .frame(maxWidth: .infinity)
@@ -922,22 +922,22 @@ struct FloatingSearchPanelContent: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
-                        .foregroundStyle(Color.white.opacity(0.6))
+                        .foregroundStyle(Color.secondary)
                 }
                 .buttonStyle(.plain)
             }
 
             Text("⌘⇧K")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color.white.opacity(0.7))
+                .foregroundStyle(Color.secondary)
                 .padding(.horizontal, Space.sm)
                 .padding(.vertical, 2) // grid: ok badge
-                .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
         }
         .padding(.horizontal, Space.lg)
         .frame(height: 56)
-        .background(Color(red: 0.14, green: 0.15, blue: 0.18))
-        .overlay(Rectangle().fill(Color.white.opacity(0.10)).frame(height: 1), alignment: .bottom) // grid: ok border
+        .background(Color(light: 0xFFFFFF, dark: 0x24262E))
+        .overlay(Rectangle().fill(Color.primary.opacity(0.10)).frame(height: 1), alignment: .bottom) // grid: ok border
     }
 
     // ── Results List ──
@@ -948,7 +948,7 @@ struct FloatingSearchPanelContent: View {
                     ForEach(controller.sections) { section in
                         Text(section.title)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.white.opacity(0.42))
+                            .foregroundStyle(Color.secondary)
                             .padding(.horizontal, Space.lg)
                             .padding(.top, Space.sm)
                             .padding(.bottom, Space.xs)
@@ -967,7 +967,7 @@ struct FloatingSearchPanelContent: View {
                 .padding(.vertical, Space.xs)
             }
             .frame(maxHeight: .infinity)
-            .background(Color(red: 0.11, green: 0.12, blue: 0.14))
+            .background(Color(light: 0xF6F6F8, dark: 0x1C1D24))
             .onChange(of: controller.selectedIndex) { _, _ in
                 if let sel = controller.selectedRow {
                     proxy.scrollTo(sel.id, anchor: .center)
@@ -982,9 +982,9 @@ struct FloatingSearchPanelContent: View {
         .overlay {
             if controller.flatRows.isEmpty {
                 VStack(spacing: Space.xs) {
-                    Text("No results").font(.headline).foregroundStyle(.white)
+                    Text("No results").font(.headline).foregroundStyle(.primary)
                     Text("Try another search term or emoji shortcode like :fire:.")
-                        .font(.caption).foregroundStyle(Color.white.opacity(0.6))
+                        .font(.caption).foregroundStyle(Color.secondary)
                 }
             }
         }
@@ -998,16 +998,16 @@ struct FloatingSearchPanelContent: View {
             } label: {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.7))
+                    .foregroundStyle(Color.secondary)
                     .frame(width: 24, height: 24)
-                    .background(Color.white.opacity(0.08), in: Circle())
+                    .background(Color.secondary.opacity(0.12), in: Circle())
             }
             .buttonStyle(.plain)
             .help("Actions (⌘K)")
 
             Text("\(controller.flatRows.count) items")
                 .font(.caption2)
-                .foregroundStyle(Color.white.opacity(0.45))
+                .foregroundStyle(Color.secondary)
 
             Spacer()
 
@@ -1018,7 +1018,7 @@ struct FloatingSearchPanelContent: View {
                     HStack(spacing: Space.xs) {
                         Text(actionTitle)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         keycap("↵")
                     }
                     .padding(.horizontal, Space.sm)
@@ -1026,7 +1026,7 @@ struct FloatingSearchPanelContent: View {
                 }
                 .buttonStyle(.plain)
 
-                Rectangle().fill(Color.white.opacity(0.18)).frame(width: 1, height: 16) // grid: ok divider
+                Rectangle().fill(Color.primary.opacity(0.18)).frame(width: 1, height: 16) // grid: ok divider
 
                 Button {
                     controller.toggleActionsMenu()
@@ -1034,28 +1034,28 @@ struct FloatingSearchPanelContent: View {
                     HStack(spacing: Space.xs) {
                         Text("Actions")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(0.85))
+                            .foregroundStyle(Color.primary)
                         HStack(spacing: 1) { // grid: ok keycap
                             Text("⌘").font(.system(size: 9, weight: .bold))
                             Text("K").font(.system(size: 9, weight: .bold))
                         }
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1) // grid: ok keycap
-                        .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
-                        .foregroundStyle(.white)
+                        .background(Color.secondary.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
+                        .foregroundStyle(.primary)
                     }
                     .padding(.horizontal, Space.sm)
                     .padding(.vertical, Space.xs)
                 }
                 .buttonStyle(.plain)
             }
-            .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.14), lineWidth: 1)) // grid: ok border
+            .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)) // grid: ok border
         }
         .padding(.horizontal, Space.lg)
         .frame(height: 36)
-        .background(Color(red: 0.08, green: 0.09, blue: 0.11))
-        .overlay(Rectangle().fill(Color.white.opacity(0.10)).frame(height: 1), alignment: .top) // grid: ok border
+        .background(Color(light: 0xEDEDF0, dark: 0x141518))
+        .overlay(Rectangle().fill(Color.primary.opacity(0.10)).frame(height: 1), alignment: .top) // grid: ok border
     }
 
     private func keycap(_ text: String) -> some View {
@@ -1063,8 +1063,8 @@ struct FloatingSearchPanelContent: View {
             .font(.system(size: 10, weight: .bold))
             .padding(.horizontal, 4)
             .padding(.vertical, 1) // grid: ok keycap
-            .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
-            .foregroundStyle(.white)
+            .background(Color.secondary.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
+            .foregroundStyle(.primary)
     }
 
     private func shortcodesBannerView(_ banner: (name: String, codes: [String])) -> some View {
@@ -1143,27 +1143,27 @@ private struct RowView: View {
 
             Text(row.title)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .lineLimit(1)
 
             Text(row.category)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.85))
+                .foregroundStyle(Color.secondary)
                 .padding(.horizontal, Space.sm)
                 .padding(.vertical, 2) // grid: ok pill
-                .background(isSelected ? Color.white.opacity(0.20) : Color.white.opacity(0.10), in: Capsule())
+                .background(isSelected ? Color.primary.opacity(0.12) : Color.primary.opacity(0.06), in: Capsule())
 
             Spacer()
 
             Text(row.primaryCode)
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0.42))
+                .foregroundStyle(isSelected ? Color.primary.opacity(0.95) : Color.secondary)
                 .lineLimit(1)
         }
         .padding(.horizontal, Space.md)
         .padding(.vertical, Space.sm)
-        .background(isSelected ? Color.white.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isSelected ? Color.white.opacity(0.18) : Color.clear, lineWidth: 1)) // grid: ok border
+        .background(isSelected ? Palette.accent.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isSelected ? Palette.accent.opacity(0.35) : Color.clear, lineWidth: 1)) // grid: ok border
         .contentShape(Rectangle())
     }
 }
@@ -1182,7 +1182,7 @@ private struct ActionsMenuOverlay: View {
             HStack {
                 Text(row.title)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.7))
+                    .foregroundStyle(Color.secondary)
                     .lineLimit(1)
                 Spacer()
                 Button {
@@ -1190,7 +1190,7 @@ private struct ActionsMenuOverlay: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .foregroundStyle(Color.secondary)
                 }
                 .buttonStyle(.plain)
             }
@@ -1198,7 +1198,7 @@ private struct ActionsMenuOverlay: View {
             .padding(.top, Space.md)
             .padding(.bottom, Space.sm)
 
-            Divider().overlay(Color.white.opacity(0.12))
+            Divider().overlay(Color.primary.opacity(0.12))
 
             VStack(spacing: 2) { // grid: ok list
                 ForEach(Array(actions.enumerated()), id: \.element.id) { idx, action in
@@ -1207,10 +1207,10 @@ private struct ActionsMenuOverlay: View {
                         Image(systemName: action.icon)
                             .font(.system(size: 13))
                             .frame(width: 20)
-                            .foregroundStyle(action.isDestructive ? Color.red : (sel ? .white : Color.white.opacity(0.7)))
+                            .foregroundStyle(action.isDestructive ? Color.red : (sel ? Palette.accent : Color.primary.opacity(0.7)))
                         Text(action.title)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(action.isDestructive ? Color.red : .white)
+                            .foregroundStyle(action.isDestructive ? Color.red : .primary)
                             .lineLimit(1)
                         Spacer()
                         if !action.shortcut.isEmpty {
@@ -1218,40 +1218,40 @@ private struct ActionsMenuOverlay: View {
                                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                                 .padding(.horizontal, Space.xs)
                                 .padding(.vertical, 2) // grid: ok keycap
-                                .background(Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
-                                .foregroundStyle(Color.white.opacity(0.85))
+                                .background(Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
+                                .foregroundStyle(Color.secondary)
                         }
                     }
                     .padding(.horizontal, Space.sm)
                     .padding(.vertical, Space.sm)
-                    .background(sel ? Color.white.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                    .background(sel ? Palette.accent.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                     .contentShape(Rectangle())
                     .onTapGesture { action.run() }
                 }
             }
             .padding(Space.xs)
 
-            Divider().overlay(Color.white.opacity(0.12))
+            Divider().overlay(Color.primary.opacity(0.12))
 
             HStack(spacing: Space.sm) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12))
-                    .foregroundStyle(Color.white.opacity(0.4))
+                    .foregroundStyle(Color.secondary)
                 TextField("", text: $controller.actionQuery,
-                          prompt: Text("Search for actions...").foregroundColor(Color.white.opacity(0.35)))
+                          prompt: Text("Search for actions...").foregroundColor(Color.secondary.opacity(0.7)))
                     .font(.system(size: 12))
                     .textFieldStyle(.plain)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
             .padding(.horizontal, Space.md)
             .padding(.vertical, Space.sm)
-            .background(Color.black.opacity(0.25))
+            .background(Color.secondary.opacity(0.08))
         }
         .frame(width: 320)
-        .background(Color(red: 0.16, green: 0.17, blue: 0.20))
+        .background(Color(light: 0xFFFFFF, dark: 0x24262E))
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.18), lineWidth: 1)) // grid: ok border
-        .shadow(color: Color.black.opacity(0.5), radius: 16, x: 0, y: 8)
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)) // grid: ok border
+        .shadow(color: Color.black.opacity(0.3), radius: 16, x: 0, y: 8)
     }
 }
 
@@ -1283,27 +1283,27 @@ private struct PlaceholderPromptHUDView: View {
             HStack(spacing: Space.sm) {
                 Image(systemName: "text.badge.plus")
                     .font(.title3)
-                    .foregroundStyle(Color(red: 0.18, green: 0.82, blue: 0.44))
+                    .foregroundStyle(Palette.accent)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(prompt.snippetName).font(.headline).foregroundStyle(.white)
+                    Text(prompt.snippetName).font(.headline).foregroundStyle(.primary)
                     Text("Type variable values. ⇥ or ↓ Next • ↵ Insert")
                         .font(.caption2)
-                        .foregroundStyle(Color.white.opacity(0.6))
+                        .foregroundStyle(Color.secondary)
                 }
                 Spacer()
                 Button {
                     controller.hide()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Color.white.opacity(0.6))
+                        .foregroundStyle(Color.secondary)
                         .font(.title3)
                 }
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, Space.lg)
             .frame(height: 56)
-            .background(Color(red: 0.14, green: 0.15, blue: 0.18))
-            .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .bottom) // grid: ok border
+            .background(Color(light: 0xFFFFFF, dark: 0x24262E))
+            .overlay(Rectangle().fill(Color.primary.opacity(0.12)).frame(height: 1), alignment: .bottom) // grid: ok border
 
             ScrollView {
                 VStack(spacing: Space.md) {
@@ -1314,15 +1314,15 @@ private struct PlaceholderPromptHUDView: View {
                             HStack(spacing: Space.md) {
                                 Text("{{\(p.key)}}")
                                     .font(.caption.monospaced().weight(.semibold))
-                                    .foregroundStyle(active ? Color(red: 0.18, green: 0.82, blue: 0.44) : Color.white.opacity(0.7))
+                                    .foregroundStyle(active ? Palette.accent : Color.secondary)
                                     .frame(width: 120, alignment: .leading)
                                 HStack(spacing: Space.xs) {
                                     if val.isEmpty {
                                         Text(p.defaultValue.map { "Default: \($0)" } ?? "Type \(p.key)...")
                                             .font(.body)
-                                            .foregroundStyle(Color.white.opacity(0.35))
+                                            .foregroundStyle(Color.secondary.opacity(0.6))
                                     } else {
-                                        Text(val).font(.body).foregroundStyle(.white)
+                                        Text(val).font(.body).foregroundStyle(.primary)
                                     }
                                     if active { BlinkingCursor() }
                                 }
@@ -1330,12 +1330,12 @@ private struct PlaceholderPromptHUDView: View {
                                 .padding(.horizontal, Space.sm)
                                 .frame(height: 36)
                                 .background(
-                                    active ? Color(red: 0.20, green: 0.22, blue: 0.26) : Color(red: 0.14, green: 0.15, blue: 0.17),
+                                    active ? Color(light: 0xEEEEF2, dark: 0x2C2F38) : Color(light: 0xF7F7F9, dark: 0x202228),
                                     in: RoundedRectangle(cornerRadius: 8)
                                 )
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8).strokeBorder(
-                                        active ? Color(red: 0.18, green: 0.82, blue: 0.44) : Color.white.opacity(0.1),
+                                        active ? Palette.accent : Color.primary.opacity(0.1),
                                         lineWidth: active ? 2 : 1
                                     ) // grid: ok border
                                 )
@@ -1345,21 +1345,21 @@ private struct PlaceholderPromptHUDView: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: Space.xs) {
-                        Text("LIVE PREVIEW").font(.caption2.weight(.bold)).foregroundStyle(Color.white.opacity(0.5))
+                        Text("LIVE PREVIEW").font(.caption2.weight(.bold)).foregroundStyle(Color.secondary)
                         Text(prompt.substituted)
                             .font(.system(size: 13, design: .monospaced))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .textSelection(.enabled)
                             .padding(Space.md)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(red: 0.08, green: 0.09, blue: 0.11), in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.12), lineWidth: 1)) // grid: ok border
+                            .background(Color(light: 0xF0F0F3, dark: 0x141518), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)) // grid: ok border
                     }
                 }
                 .padding(Space.lg)
             }
             .frame(maxHeight: 280)
-            .background(Color(red: 0.11, green: 0.12, blue: 0.14))
+            .background(Color(light: 0xF6F6F8, dark: 0x1C1D24))
 
             HStack(spacing: Space.sm) {
                 Text("↵ Insert"); Text("•"); Text("⇥ / ↓ Next"); Text("•"); Text("esc Cancel")
@@ -1376,11 +1376,11 @@ private struct PlaceholderPromptHUDView: View {
                 .controlSize(.small)
             }
             .font(.caption2)
-            .foregroundStyle(Color.white.opacity(0.65))
+            .foregroundStyle(Color.secondary)
             .padding(.horizontal, Space.lg)
             .frame(height: 40)
-            .background(Color(red: 0.08, green: 0.09, blue: 0.11))
-            .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1), alignment: .top) // grid: ok border
+            .background(Color(light: 0xEDEDF0, dark: 0x141518))
+            .overlay(Rectangle().fill(Color.primary.opacity(0.12)).frame(height: 1), alignment: .top) // grid: ok border
         }
     }
 }

@@ -224,10 +224,10 @@ struct ClipboardCard: View {
                     }
                 }
 
-                // Title in bold white
+                // Title in bold (black in light mode, white in dark mode)
                 Text(entry.title)
                     .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
 
@@ -235,7 +235,7 @@ struct ClipboardCard: View {
                 if !entry.content.isEmpty && entry.content != entry.title {
                     Text(entry.content.replacingOccurrences(of: "\n", with: " "))
                         .font(.system(size: 13))
-                        .foregroundStyle(Color(red: 0.65, green: 0.67, blue: 0.72))
+                        .foregroundStyle(.secondary)
                         .lineLimit(hasImage ? 2 : 4)
                         .multilineTextAlignment(.leading)
                 }
@@ -257,7 +257,7 @@ struct ClipboardCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
                     )
                     .padding(.horizontal, Space.sm)
                     .padding(.bottom, Space.sm)
@@ -265,13 +265,13 @@ struct ClipboardCard: View {
         }
         .frame(minHeight: hasImage ? 220 : 160, maxHeight: hasImage ? 230 : 170)
         .background(
-            Color(red: 0.14, green: 0.15, blue: 0.17),
+            Color(nsColor: .controlBackgroundColor),
             in: RoundedRectangle(cornerRadius: 24, style: .continuous)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(
-                    isSelected ? Color(red: 0.05, green: 0.52, blue: 1.0) : Color.white.opacity(0.06),
+                    isSelected ? Palette.accent : Color.primary.opacity(0.08),
                     lineWidth: isSelected ? 3 : 1
                 )
         )

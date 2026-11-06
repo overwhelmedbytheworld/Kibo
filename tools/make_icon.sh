@@ -6,6 +6,15 @@
 set -euo pipefail
 here=${0:A:h}
 repo=${here:h}
+
+if [[ -z "${DEVELOPER_DIR:-}" ]]; then
+  if [[ -d "/Applications/Xcode-beta.app/Contents/Developer" ]]; then
+    export DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer"
+  elif [[ -d "/Applications/Xcode.app/Contents/Developer" ]]; then
+    export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+  fi
+fi
+
 icon="$repo/Icon/AppIcon.icon"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

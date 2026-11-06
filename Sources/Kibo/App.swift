@@ -16,6 +16,8 @@ import SwiftUI
 struct KiboApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel(container: Store.makeContainer())
+    @State private var locationManager = AppLocationManager.shared
+    @AppStorage("appearance.menuBarIconStyle") private var menuBarIconStyleRaw = MenuBarIconStyle.color.rawValue
 
     var body: some Scene {
         // Main management window.
@@ -27,7 +29,7 @@ struct KiboApp: App {
                 .frame(minWidth: 720, minHeight: 440)
                 .onAppear {
                     model.mainWindowOpen = true
-                    NSApp.setActivationPolicy(.regular)
+                    locationManager.apply()
                 }
                 .onDisappear {
                     model.mainWindowOpen = false
@@ -82,11 +84,22 @@ struct KiboApp: App {
                 .keyboardShortcut(.delete, modifiers: [.command])
                 .disabled(model.selection == nil)
             }
+            CommandGroup(replacing: .help) {
+                Button("Welcome to Kibo…") {
+                    OnboardingWindowController.shared.show()
+                }
+            }
         }
 
-        // Menu bar presence — always visible.
-        MenuBarExtra("Kibo", systemImage: "doc.on.clipboard") {
+        // Menu bar presence — visible when configured for Menu Bar or Both.
+        MenuBarExtra(isInserted: Binding(
+            get: { locationManager.showsInMenuBar },
+            set: { _ in }
+        )) {
             MenuBarMenu(model: model)
+        } label: {
+            Image(nsImage: MenuBarIcon.image(for: MenuBarIconStyle(rawValue: menuBarIconStyleRaw) ?? .color))
+                .accessibilityLabel("Kibo")
         }
 
         Settings {
@@ -105,6 +118,13 @@ struct MenuBarMenu: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        if !AXIsProcessTrusted() {
+            Button("⚠️ Accessibility: Not Granted (Triggers Inactive)") {
+                OnboardingWindowController.shared.show()
+            }
+            Divider()
+        }
+
         Button("Quick Search & Insert") {
             FloatingPanelController.shared.show(model: model)
         }
@@ -112,6 +132,9 @@ struct MenuBarMenu: View {
 
         Button("Open Kibo") {
             openWindow(id: "main")
+            for window in NSApp.windows where window.canBecomeMain {
+                window.makeKeyAndOrderFront(nil)
+            }
             NSApp.activate()
         }
         .keyboardShortcut("o")
@@ -122,6 +145,10 @@ struct MenuBarMenu: View {
             .foregroundStyle(.secondary)
 
         Divider()
+
+        Button("Welcome to Kibo…") {
+            OnboardingWindowController.shared.show()
+        }
 
         Button("Settings…") {
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
@@ -142,8 +169,24 @@ struct MenuBarMenu: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate()
+        AppLocationManager.shared.apply()
+
+        // Show onboarding automatically on first launch (unless overridden by tests/snapshots)
+        if !Store.isOverridden && !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
+            OnboardingWindowController.shared.show()
+        }
+    }
+
+    /// Handle clicking the Dock icon when running in Dock mode or reopen requested.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            for window in sender.windows where window.canBecomeMain {
+                window.makeKeyAndOrderFront(nil)
+                sender.activate()
+                return true
+            }
+        }
+        return true
     }
 
     /// Do not quit when the main window closes — the menu bar item stays.

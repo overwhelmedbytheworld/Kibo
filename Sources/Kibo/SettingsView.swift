@@ -62,6 +62,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 struct GeneralSettings: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @AppStorage("historyLimit") private var historyLimit = 500
+    @State private var locationManager = AppLocationManager.shared
 
     var body: some View {
         Section("Startup") {
@@ -78,6 +79,22 @@ struct GeneralSettings: View {
                         launchAtLogin = !enabled
                     }
                 }
+        }
+
+        Section("App Icon & Visibility") {
+            Picker("Show Kibo in", selection: Binding(
+                get: { locationManager.location },
+                set: { locationManager.location = $0 }
+            )) {
+                ForEach(AppLocation.allCases) { loc in
+                    Text(loc.title).tag(loc)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("Default is Menu Bar. Choose Dock to show the app icon on the Dock every time, or Both to display in both places.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
 
         Section("Clipboard History") {
@@ -108,40 +125,157 @@ struct GeneralSettings: View {
                 .foregroundStyle(.secondary)
         }
 
+        DisableSuggestionsInAppsView()
+    }
+}
+
+// MARK: - Excluded Apps Section
+
+struct DisableSuggestionsInAppsView: View {
+    @State private var customApps: [ExcludedAppItem] = InlineSuggestionController.customExcludedApps
+    @State private var selectedBundleID: String? = nil
+
+    private struct BuiltInAppInfo: Identifiable {
+        let id: String
+        let name: String
+        let bundleIDs: [String]
+        let primaryBundleID: String
+    }
+
+    private let builtInApps: [BuiltInAppInfo] = [
+        BuiltInAppInfo(id: "whatsapp", name: "WhatsApp", bundleIDs: ["net.whatsapp.WhatsApp", "net.whatsapp.WhatsApp.mac"], primaryBundleID: "net.whatsapp.WhatsApp"),
+        BuiltInAppInfo(id: "discord", name: "Discord", bundleIDs: ["com.hnc.Discord", "com.discord"], primaryBundleID: "com.hnc.Discord"),
+        BuiltInAppInfo(id: "slack", name: "Slack", bundleIDs: ["com.tinyspeck.slackmacgap"], primaryBundleID: "com.tinyspeck.slackmacgap")
+    ]
+
+    var body: some View {
         Section("Disable Inline Suggestions in Apps") {
             Text("Some apps already have built-in shortcode pickers. Disable Kibo's suggestion bar in these apps to prevent duplicate or conflicting popups:")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Toggle("WhatsApp", isOn: Binding(
-                get: {
-                    InlineSuggestionController.excludedBundleIDs.contains("net.whatsapp.WhatsApp")
-                },
-                set: { isExcluded in
-                    InlineSuggestionController.setAppExcluded(bundleID: "net.whatsapp.WhatsApp", isExcluded: isExcluded)
-                    InlineSuggestionController.setAppExcluded(bundleID: "net.whatsapp.WhatsApp.mac", isExcluded: isExcluded)
+            ForEach(builtInApps) { app in
+                HStack(spacing: Space.sm) {
+                    appIcon(bundleID: app.primaryBundleID, path: nil)
+                    Text(app.name)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: {
+                            app.bundleIDs.contains { InlineSuggestionController.excludedBundleIDs.contains($0) }
+                        },
+                        set: { isExcluded in
+                            for bid in app.bundleIDs {
+                                InlineSuggestionController.setAppExcluded(bundleID: bid, isExcluded: isExcluded)
+                            }
+                        }
+                    ))
+                    .labelsHidden()
                 }
-            ))
+            }
 
-            Toggle("Discord", isOn: Binding(
-                get: {
-                    InlineSuggestionController.excludedBundleIDs.contains("com.hnc.Discord")
-                },
-                set: { isExcluded in
-                    InlineSuggestionController.setAppExcluded(bundleID: "com.hnc.Discord", isExcluded: isExcluded)
-                    InlineSuggestionController.setAppExcluded(bundleID: "com.discord", isExcluded: isExcluded)
+            ForEach(customApps) { app in
+                HStack(spacing: Space.sm) {
+                    appIcon(bundleID: app.bundleID, path: app.path)
+                    Text(app.name)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: {
+                            InlineSuggestionController.excludedBundleIDs.contains(app.bundleID)
+                        },
+                        set: { isExcluded in
+                            InlineSuggestionController.setAppExcluded(bundleID: app.bundleID, isExcluded: isExcluded)
+                        }
+                    ))
+                    .labelsHidden()
                 }
-            ))
+                .padding(.horizontal, Space.xs)
+                .padding(.vertical, 2)
+                .background(
+                    selectedBundleID == app.bundleID ? Palette.accent.opacity(0.12) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selectedBundleID = (selectedBundleID == app.bundleID) ? nil : app.bundleID
+                }
+            }
 
-            Toggle("Slack", isOn: Binding(
-                get: {
-                    InlineSuggestionController.excludedBundleIDs.contains("com.tinyspeck.slackmacgap")
-                },
-                set: { isExcluded in
-                    InlineSuggestionController.setAppExcluded(bundleID: "com.tinyspeck.slackmacgap", isExcluded: isExcluded)
+            // + / - button toolbar matching macOS System Settings
+            HStack {
+                HStack(spacing: 0) {
+                    Button(action: openAppPicker) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 28, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Add another application from Applications")
+
+                    Divider()
+                        .frame(height: 12)
+
+                    Button(action: removeSelectedApp) {
+                        Image(systemName: "minus")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 28, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(selectedBundleID == nil || !customApps.contains(where: { $0.bundleID == selectedBundleID }))
+                    .help("Remove selected custom application")
                 }
-            ))
+                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+
+                Spacer()
+            }
+            .padding(.top, Space.xs)
         }
+    }
+
+    private func appIcon(bundleID: String, path: String?) -> some View {
+        let image: NSImage
+        if let path, FileManager.default.fileExists(atPath: path) {
+            image = NSWorkspace.shared.icon(forFile: path)
+        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            image = NSWorkspace.shared.icon(forFile: url.path)
+        } else {
+            image = NSWorkspace.shared.icon(for: .application)
+        }
+        image.size = NSSize(width: 20, height: 20) // grid: ok app icon size
+        return Image(nsImage: image)
+            .resizable()
+            .frame(width: 20, height: 20)
+    }
+
+    private func openAppPicker() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Open"
+        panel.message = "Choose an application to disable inline suggestions in:"
+        if panel.runModal() == .OK, let url = panel.url {
+            let path = url.path
+            let name = FileManager.default.displayName(atPath: path)
+            let bundle = Bundle(url: url)
+            let bundleID = bundle?.bundleIdentifier ?? url.deletingPathExtension().lastPathComponent
+            InlineSuggestionController.addCustomExcludedApp(name: name, bundleID: bundleID, path: path)
+            customApps = InlineSuggestionController.customExcludedApps
+            selectedBundleID = bundleID
+        }
+    }
+
+    private func removeSelectedApp() {
+        guard let id = selectedBundleID else { return }
+        InlineSuggestionController.removeCustomExcludedApp(bundleID: id)
+        customApps = InlineSuggestionController.customExcludedApps
+        selectedBundleID = nil
     }
 }
 

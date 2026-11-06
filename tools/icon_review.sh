@@ -7,6 +7,15 @@ set -euo pipefail
 here=${0:A:h}
 repo=${here:h}
 out=${1:-/tmp/Kibo-icon.png}
+
+if [[ -z "${DEVELOPER_DIR:-}" ]]; then
+  if [[ -d "/Applications/Xcode-beta.app/Contents/Developer" ]]; then
+    export DEVELOPER_DIR="/Applications/Xcode-beta.app/Contents/Developer"
+  elif [[ -d "/Applications/Xcode.app/Contents/Developer" ]]; then
+    export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+  fi
+fi
+
 ictool="$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool"
 [[ -x "$ictool" ]] || { echo "ictool not found. Install Xcode 26 or later."; exit 1; }
 work=$(mktemp -d)
@@ -22,5 +31,5 @@ render TintedDark 256 3.png
 render ClearLight 256 4.png
 render Default 32 5.png
 render Default 16 6.png
-swift "$here/icon_sheet.swift" "$out" "$work"/{1,2,3,4,5,6}.png
+swift -module-cache-path /tmp/swift-cache "$here/icon_sheet.swift" "$out" "$work"/{1,2,3,4,5,6}.png
 echo "wrote $out"

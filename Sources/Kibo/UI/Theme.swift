@@ -45,6 +45,38 @@ struct Theme: Identifiable, Hashable {
     ]
 }
 
+public enum AppearanceMode: String, CaseIterable, Identifiable, Sendable {
+    case system = "system"
+    case light = "light"
+    case dark = "dark"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    public var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+
+    public var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
 /// The chosen accent, saved in UserDefaults. Views that read `theme` redraw
 /// when it changes.
 @Observable
@@ -65,6 +97,13 @@ final class ThemeStore {
         didSet { UserDefaults.standard.set(themeID, forKey: "appearance.accent") }
     }
 
+    var appearanceMode: AppearanceMode {
+        didSet {
+            UserDefaults.standard.set(appearanceMode.rawValue, forKey: "appearance.mode")
+            applyAppearance()
+        }
+    }
+
     /// True while the Mac's accent is Multicolor.
     private(set) var macIsMulticolor = ThemeStore.readMulticolor()
 
@@ -76,9 +115,17 @@ final class ThemeStore {
         return chosen
     }
 
+    func applyAppearance() {
+        NSApp.appearance = appearanceMode.nsAppearance
+    }
+
     private init() {
         themeID = ProcessInfo.processInfo.environment["APP_ACCENT"]
             ?? UserDefaults.standard.string(forKey: "appearance.accent") ?? Self.defaultID
+        let modeStr = UserDefaults.standard.string(forKey: "appearance.mode") ?? AppearanceMode.system.rawValue
+        self.appearanceMode = AppearanceMode(rawValue: modeStr) ?? .system
+        applyAppearance()
+
         NotificationCenter.default.addObserver(forName: NSColor.systemColorsDidChangeNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.macIsMulticolor = ThemeStore.readMulticolor() }
@@ -109,7 +156,9 @@ private struct Themed: ViewModifier {
     private var store = ThemeStore.shared
 
     func body(content: Content) -> some View {
-        content.tint(store.theme.tint)
+        content
+            .tint(store.theme.tint)
+            .preferredColorScheme(store.appearanceMode.colorScheme)
     }
 }
 

@@ -161,6 +161,7 @@ enum SelfTest {
             check("topEmojis includes fire", EmojiUsageTracker.shared.topEmojis(limit: 5).contains(where: { $0.emoji == "🔥" }))
             check("sound feedback enabled by default", SoundFeedback.isEnabled)
             check("inline suggestion controller instantiated", !InlineSuggestionController.shared.isVisible)
+            UserDefaults.standard.removeObject(forKey: "kibo.inline.excluded_bundles")
             check("inline suggestions excluded in WhatsApp by default", InlineSuggestionController.isAppExcluded(bundleID: "net.whatsapp.WhatsApp", appName: "WhatsApp"))
             check("inline suggestions excluded in Discord by default", InlineSuggestionController.isAppExcluded(bundleID: "com.hnc.Discord", appName: "Discord"))
             check("inline suggestions excluded in Slack by default", InlineSuggestionController.isAppExcluded(bundleID: "com.tinyspeck.slackmacgap", appName: "Slack"))
@@ -254,6 +255,63 @@ enum SelfTest {
 
             controller.hide()
             check("command bar is hidden after hide", !controller.isVisible)
+
+            // 15. Menu Bar & App Location
+            check("menuBar location shows in menu bar", AppLocation.menuBar.showsInMenuBar)
+            check("menuBar location hides dock icon", !AppLocation.menuBar.showsInDock)
+            check("dock location shows in dock", AppLocation.dock.showsInDock)
+            check("dock location hides menu bar icon", !AppLocation.dock.showsInMenuBar)
+            check("both location shows in both", AppLocation.both.showsInMenuBar && AppLocation.both.showsInDock)
+            check("menu bar color icon is valid image", MenuBarIcon.colorImage.isValid)
+            check("menu bar color icon size is 18x18", MenuBarIcon.colorImage.size.width == 18 && MenuBarIcon.colorImage.size.height == 18)
+            check("menu bar color icon is not template", !MenuBarIcon.colorImage.isTemplate)
+            check("menu bar monochrome icon is valid", MenuBarIcon.monochromeImage.isValid)
+            check("menu bar monochrome icon is template", MenuBarIcon.monochromeImage.isTemplate)
+            check("menu bar icon style enum has cases", MenuBarIconStyle.allCases.count == 2)
+
+            // 16. Appearance Mode
+            check("appearance mode light has light colorScheme", AppearanceMode.light.colorScheme == .light)
+            check("appearance mode dark has dark colorScheme", AppearanceMode.dark.colorScheme == .dark)
+            check("appearance mode system has nil colorScheme", AppearanceMode.system.colorScheme == nil)
+
+            // 17. Custom Excluded Apps
+            let testAppID = "com.test.CustomApp"
+            InlineSuggestionController.addCustomExcludedApp(name: "CustomApp", bundleID: testAppID, path: "/Applications/CustomApp.app")
+            check("custom excluded app was added", InlineSuggestionController.customExcludedApps.contains(where: { $0.bundleID == testAppID }))
+            check("custom excluded app is excluded", InlineSuggestionController.isAppExcluded(bundleID: testAppID, appName: "CustomApp"))
+            InlineSuggestionController.removeCustomExcludedApp(bundleID: testAppID)
+            check("custom app removed", !InlineSuggestionController.customExcludedApps.contains(where: { $0.bundleID == testAppID }))
+            check("removed app no longer excluded", !InlineSuggestionController.isAppExcluded(bundleID: testAppID, appName: "CustomApp"))
+
+            // 18. First-Launch Onboarding State Machine & 2-Stage Skip
+            check("onboarding has 5 steps", OnboardingStep.allCases.count == 5)
+            let testVM = OnboardingViewModel()
+            check("onboarding starts at welcome", testVM.currentStep == .welcome)
+            testVM.next()
+            check("next advances to emojiMotion", testVM.currentStep == .emojiMotion)
+            testVM.next()
+            check("next advances to searchDemo", testVM.currentStep == .searchDemo)
+            testVM.next()
+            check("next advances to expansionDemo", testVM.currentStep == .expansionDemo)
+            testVM.previous()
+            check("previous returns to searchDemo", testVM.currentStep == .searchDemo)
+
+            // Test Stage 1 Skip Protection: skipping from step 2 jumps directly to permissions
+            testVM.skipOrClose()
+            check("skip from searchDemo jumps to permissions", testVM.currentStep == .permissions)
+
+            // Test Stage 2 Skip Protection: closing from permissions triggers degraded alert if unauthorized
+            if !testVM.isAuthorized {
+                testVM.skipOrClose()
+                check("skip from permissions triggers degraded alert", testVM.showDegradedAlert)
+                testVM.continueInLimitedMode()
+                check("continueInLimitedMode marks completed", UserDefaults.standard.bool(forKey: "hasCompletedOnboarding"))
+                check("continueInLimitedMode marks limited mode", UserDefaults.standard.bool(forKey: "onboarding.completedInLimitedMode"))
+            }
+
+            // Restore defaults for clean state
+            UserDefaults.standard.removeObject(forKey: "hasCompletedOnboarding")
+            UserDefaults.standard.removeObject(forKey: "onboarding.completedInLimitedMode")
 
             print(failures == 0 ? "SELFTEST PASS \(count) checks" : "SELFTEST FAIL \(failures) of \(count) checks")
             finish(code: failures == 0 ? 0 : 1)

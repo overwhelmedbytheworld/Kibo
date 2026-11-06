@@ -1,3 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect x="262" y="372" width="500" height="380" rx="72" fill="#FFFFFF"/>
+  <!-- Front: Primary prompt keycap with mathematically centered chevron cutout -->
+  <path fill-rule="evenodd" clip-rule="evenodd" fill="#FFFFFF" d="
+    M 370 316
+    h 284
+    a 88 88 0 0 1 88 88
+    v 284
+    a 88 88 0 0 1 -88 88
+    h -284
+    a 88 88 0 0 1 -88 -88
+    v -284
+    a 88 88 0 0 1 88 -88
+    Z
+    M 402 416
+    l 140 130
+    l -140 130
+    h 80
+    l 140 -130
+    l -140 -130
+    Z
+  "/>
 </svg>

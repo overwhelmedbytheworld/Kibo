@@ -25,6 +25,19 @@ final class InlineSuggestionPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+public struct ExcludedAppItem: Codable, Identifiable, Hashable, Sendable {
+    public var id: String { bundleID }
+    public let name: String
+    public let bundleID: String
+    public let path: String?
+
+    public init(name: String, bundleID: String, path: String? = nil) {
+        self.name = name
+        self.bundleID = bundleID
+        self.path = path
+    }
+}
+
 // MARK: - Controller
 
 @MainActor
@@ -38,6 +51,37 @@ public final class InlineSuggestionController: ObservableObject {
         "com.hnc.Discord",
         "com.discord"
     ]
+
+    public static var customExcludedApps: [ExcludedAppItem] {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: "kibo.inline.custom_apps"),
+                  let items = try? JSONDecoder().decode([ExcludedAppItem].self, from: data) else {
+                return []
+            }
+            return items
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(data, forKey: "kibo.inline.custom_apps")
+            }
+        }
+    }
+
+    public static func addCustomExcludedApp(name: String, bundleID: String, path: String?) {
+        var apps = customExcludedApps
+        if !apps.contains(where: { $0.bundleID.lowercased() == bundleID.lowercased() }) {
+            apps.append(ExcludedAppItem(name: name, bundleID: bundleID, path: path))
+            customExcludedApps = apps
+        }
+        setAppExcluded(bundleID: bundleID, isExcluded: true)
+    }
+
+    public static func removeCustomExcludedApp(bundleID: String) {
+        var apps = customExcludedApps
+        apps.removeAll(where: { $0.bundleID.lowercased() == bundleID.lowercased() })
+        customExcludedApps = apps
+        setAppExcluded(bundleID: bundleID, isExcluded: false)
+    }
 
     public static var isInlineSuggestionEnabled: Bool {
         get {
